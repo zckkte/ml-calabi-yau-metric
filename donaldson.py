@@ -34,7 +34,7 @@ def monomials(k):
 
 def donaldson(k, generator=generate_quintic_point_weights):
     """ Calculates the numerical Calabi-Yau metric on the ambient space $P^4$ """
-    point_weights, sections = generate_quintic_point_weights(k)
+    point_weights, sections = generator(k)
     n_k = basis_size(k)
     n_p = len(point_weights)
     h_0 = np.zeros((n_k, n_k), dtype=complex)
