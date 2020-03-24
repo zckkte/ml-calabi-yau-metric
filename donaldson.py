@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.special import comb
-from itertools import combinations_with_replacement
+from itertools import combinations_with_replacement, islice
 from functools import * 
 
 COORDINATES = 5
@@ -12,7 +12,7 @@ def eval_sections(sections, point):
     return np.fromiter(map(lambda monomial: monomial(point), sections), dtype=complex)
 
 def basis_size(k):
-    return int(comb(COORDINATES  + k - 1, k) if k <= 0 \
+    return int(comb(COORDINATES + k - 1, k) if k < COORDINATES \
         else (comb(COORDINATES + k - 1, k) - comb(k - 1, k - COORDINATES)))
 
 def generate_quintic_point_weights(k):
@@ -25,12 +25,14 @@ def generate_quintic_point_weights(k):
 def monomials(k):
     """ 
     A set of k degree monomials basis 
-    Returns: sections on the complex projector space $P^4$ represented by an array of functions 
+    Returns: sections (represented by a partial function generator) 
+        on the complex projection space $P^4$ constrained to the fermat quintic 
     """
-    #TODO: need to constrain to hypersurface
-    monomial = lambda z, select_indices : np.prod(np.take(z, select_indices))
-    for select_indices in combinations_with_replacement(range((COORDINATES - 1) + k - 1), k):
-        yield partial(monomial, select_indices=list(select_indices))
+    start_index = int(comb(k - 1, k - COORDINATES)) if k >= COORDINATES else None 
+    monomial_index_iter = islice(combinations_with_replacement(range(COORDINATES), k), start_index, None)
+    for select_indices in monomial_index_iter:
+        yield partial(lambda z, select_indices : np.prod(np.take(z, select_indices)), 
+            select_indices=list(select_indices)) 
 
 def donaldson(k, generator=generate_quintic_point_weights):
     """ Calculates the numerical Calabi-Yau metric on the ambient space $P^4$ """
