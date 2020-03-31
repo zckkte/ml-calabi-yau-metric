@@ -1,12 +1,16 @@
 import numpy as np
 from scipy.special import comb
+from scipy import optimize
 from itertools import combinations_with_replacement, islice
 from functools import * 
 
 COORDINATES = 5
 DONALDSON_MAX_ITERATIONS = 10
 
-point_weight_dtype = np.dtype([('point', np.complex64, COORDINATES), ('weight', np.float64)])
+point_weight_dtype = np.dtype([
+    ('point', np.complex64, COORDINATES), 
+    ('weight', np.float64) 
+])
 
 def eval_sections(sections, point):
     return np.fromiter(map(lambda monomial: monomial(point), sections), dtype=complex)
@@ -14,6 +18,31 @@ def eval_sections(sections, point):
 def basis_size(k):
     return int(comb(COORDINATES + k - 1, k) if k < COORDINATES \
         else (comb(COORDINATES + k - 1, k) - comb(k - 1, k - COORDINATES)))
+
+def compose(*functions):
+    return reduce(lambda f, g: lambda x: f(g(x)), functions, lambda x: x)
+
+def sample_ambient_pair():
+    """two distinct random points in ambient $P^4$ space"""
+    n = 9
+    p, q = np.split(np.random.normal(0, 1, 2 * (n + 1)), 2)
+    normalise = lambda r : r / (np.sum(r ** 2) ** (0.5))
+    to_complex_proj = (lambda v : v.reshape((5, 2)).astype(float)
+        .view(np.complex128)
+        .reshape(5))
+    to_ambient = compose(to_complex_proj, normalise)
+    return to_ambient(p), to_ambient(q)
+
+def sample_quintic():
+    """samples 5 points from fermat quintic """
+    p, q = sample_ambient_pair()
+    line = lambda t, p, q : (p + q * t) 
+    quintic_points = lambda ts, p, q : np.array([ line(t, p, q) for t in ts ]) 
+    quintic_intersect = lambda t, *points : np.sum( line(t, points[0], points[1]) ** 5)  
+    sol = optimize.fsolve(quintic_intersect, 0., args=(p, q))
+    #quintic_inter_solve = lambda part, initial : optimize.fsolve(part(quintic_intersect), initial, args=(p, q))
+    #quintic_inter_solve(np.real, 0.), quintic_inter_solve(np.imag, 0.)
+    return quintic_points(sol, p, q)
 
 def generate_quintic_point_weights(k):
     """ (STUB) Generates a structured array of points (on fermat quintic) and associated integration weights """
