@@ -36,20 +36,28 @@ def sample_ambient_pair():
 def sample_quintic():
     """samples 5 points from fermat quintic """
     p, q = sample_ambient_pair()
-    line = lambda t, p, q : (p + q * t) 
-    quintic_points = lambda ts, p, q : np.array([ line(t, p, q) for t in ts ]) 
-    quintic_intersect = lambda t, *points : np.sum( line(t, points[0], points[1]) ** 5)  
-    sol = optimize.fsolve(quintic_intersect, 0., args=(p, q))
-    #quintic_inter_solve = lambda part, initial : optimize.fsolve(part(quintic_intersect), initial, args=(p, q))
-    #quintic_inter_solve(np.real, 0.), quintic_inter_solve(np.imag, 0.)
-    return quintic_points(sol, p, q)
+    quintic_intersect_coeff = lambda p, q : [ np.sum(comb(COORDINATES, i) * p ** (COORDINATES - i) * q ** i) 
+        for i in range(COORDINATES + 1) ] 
+    roots = np.roots(quintic_intersect_coeff(p, q))
+    return [ p + q * t for t in roots ]
+
+def sample_quintic_points(n_p):
+    return np.concatenate(reduce(lambda acc, _ : acc + [sample_quintic()], 
+        range(int(n_p / COORDINATES)), []))
+
+def weights(n_p, sample_points):
+    fubini_study_kahler_pot = lambda p : (1 / np.pi) * np.sum(np.abs(p) ** 2)
+    return np.ones(n_p)
 
 def generate_quintic_point_weights(k):
-    """ (STUB) Generates a structured array of points (on fermat quintic) and associated integration weights """
+    """ Generates a structured array of points (on fermat quintic) and associated integration weights """
     n_k = basis_size(k)
-    point_weights = np.ones(n_k, dtype=point_weight_dtype)
-    sections = monomials(k) 
-    return point_weights, sections
+    n_p = 10 * n_k ** 2 + 50000
+    point_weights = np.zeros((n_p), dtype=point_weight_dtype)
+    sample_points = sample_quintic_points(n_p)
+    point_weights['point'], point_weights['weight'] = sample_points, weights(n_p, sample_points)
+
+    return point_weights, monomials(k) 
 
 def monomials(k):
     """ 
