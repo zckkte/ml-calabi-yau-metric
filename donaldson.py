@@ -27,6 +27,7 @@ def sample_ambient_pair():
     n = 9
     p, q = np.split(np.random.normal(0, 1, 2 * (n + 1)), 2)
     normalise = lambda r : r / (np.sum(r ** 2) ** (0.5))
+    # map to P^4
     to_complex_proj = (lambda v : v.reshape((5, 2)).astype(float)
         .view(np.complex128)
         .reshape(5))
@@ -38,16 +39,42 @@ def sample_quintic():
     p, q = sample_ambient_pair()
     quintic_intersect_coeff = lambda p, q : [ np.sum(comb(COORDINATES, i) * p ** (COORDINATES - i) * q ** i) 
         for i in range(COORDINATES + 1) ] 
-    roots = np.roots(quintic_intersect_coeff(p, q))
+    roots = np.roots(quintic_intersect_coeff(np.transpose(p), q))
     return [ p + q * t for t in roots ]
 
 def sample_quintic_points(n_p):
     return np.concatenate(reduce(lambda acc, _ : acc + [sample_quintic()], 
         range(int(n_p / COORDINATES)), []))
 
+def find_max_dq_coord(point):
+    p_affine = to_affine_patch(point)
+    dq_abs = lambda p : np.absolute([5 * z ** 4 for z in p])
+    dq_abs_max_index = (lambda func, cond, p : np.argmax(np.ma.array(func(p), 
+        mask=map(lambda x : cond(x), p))) )
+    dq_max_index = dq_abs_max_index(dq_abs, lambda x : x == np.complex(1, 0), p_affine)
+    return point[dq_max_index]
+
+def to_affine_patch(point):
+    max_norm_coord = lambda p : p[np.argmax(np.absolute(p))]
+    return point / max_norm_coord(point)
+
+def find_kahler_form(point):
+    pass
+
+def compute_gradient(point):
+    pass
+
+def find_good_coordinates(point):
+    pass
+
+def fubini_study_kahler_form(point):
+    pass
+
 def weights(n_p, sample_points):
-    fubini_study_kahler_pot = lambda p : (1 / np.pi) * np.sum(np.abs(p) ** 2)
-    return np.ones(n_p)
+    """ (STUB) """
+    fubini_study_kahler_pot = lambda p : (1 / np.pi) * np.log(np.sum(np.abs(p) ** 2))
+    
+    return np.ones(n_p, dtype=np.float)
 
 def generate_quintic_point_weights(k):
     """ Generates a structured array of points (on fermat quintic) and associated integration weights """
