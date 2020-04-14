@@ -46,13 +46,23 @@ def sample_quintic_points(n_p):
     return np.concatenate(reduce(lambda acc, _ : acc + [sample_quintic()], 
         range(int(n_p / COORDINATES)), []))
 
-def find_max_dq_coord(point):
-    p_affine = to_affine_patch(point)
+def weight(point):
+    pass
+
+def to_good_coordinates(point):
+    """accepts point in affine patch"""
+    x = np.copy(point)
+    max_dq_index= find_max_dq_coord_index(point) 
+    exclude_max_dq_index = (x != x[max_dq_index]) & (x != complex(1, 0))
+    x[max_dq_index] = (-1 + np.sum((-1) * x[exclude_max_dq_index] ** 5)) ** (1/5)
+    return x
+
+def find_max_dq_coord_index(point):
+    """accepts point in affine patch"""
     dq_abs = lambda p : np.absolute([5 * z ** 4 for z in p])
-    dq_abs_max_index = (lambda func, cond, p : np.argmax(np.ma.array(func(p), 
-        mask=map(lambda x : cond(x), p))) )
-    dq_max_index = dq_abs_max_index(dq_abs, lambda x : x == np.complex(1, 0), p_affine)
-    return point[dq_max_index]
+    dq_abs_max_index = lambda func, p : np.argmax(np.ma.array(func(p),
+        mask=p==np.complex(1, 0))) 
+    return dq_abs_max_index(dq_abs, point)
 
 def to_affine_patch(point):
     max_norm_coord = lambda p : p[np.argmax(np.absolute(p))]
@@ -62,9 +72,6 @@ def find_kahler_form(point):
     pass
 
 def compute_gradient(point):
-    pass
-
-def find_good_coordinates(point):
     pass
 
 def fubini_study_kahler_form(point):
