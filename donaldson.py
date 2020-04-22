@@ -3,6 +3,7 @@ from scipy.special import comb
 from scipy import optimize
 from itertools import combinations_with_replacement, islice
 from functools import * 
+import numdifftools as nd
 
 COORDINATES = 5
 DONALDSON_MAX_ITERATIONS = 10
@@ -35,52 +36,68 @@ def sample_ambient_pair():
     return to_ambient(p), to_ambient(q)
 
 def sample_quintic():
-    """samples 5 points from fermat quintic """
+    """samples 5 points from fermat quintic in affine coordinates"""
     p, q = sample_ambient_pair()
     quintic_intersect_coeff = lambda p, q : [ np.sum(comb(COORDINATES, i) * p ** (COORDINATES - i) * q ** i) 
         for i in range(COORDINATES + 1) ] 
-    roots = np.roots(quintic_intersect_coeff(np.transpose(p), q))
-    return [ p + q * t for t in roots ]
+    roots = np.roots(quintic_intersect_coeff(q, p))
+    return [ to_affine_patch(p + q * t) for t in roots ]
 
 def sample_quintic_points(n_p):
     return np.concatenate(reduce(lambda acc, _ : acc + [sample_quintic()], 
         range(int(n_p / COORDINATES)), []))
 
 def weight(point):
-    pass
+    z_j = point[find_max_dq_coord_index(point)] 
+    w = find_kahler_form(point, z_j)
+    return (5 ** -2) * np.abs(z_j) ** (-8) * np.linalg.det(w) ** (-1)
+
+def find_kahler_form(point, z_j):
+    jac = jacobian(point, z_j)
+    jac_bar = np.conj(jac)
+    w_fs_form = fubini_study_kahler_form(point)
+    return np.einsum('ia,ij,jb -> ab', jac, w_fs_form, jac_bar)
+
+def jacobian(z, z_j):
+    select = (z != z_j) & (np.isclose(z, np.complex(1, 0 )) == False)
+    partials = -(z[select] / z_j) ** 4
+    return np.array([
+        [0, partials[0], 1, 0, 0 ], 
+        [0, partials[1], 0, 1, 0 ], 
+        [0, partials[2], 0, 0, 1 ]
+    ])
+
+def fubini_study_kahler_form(point):
+    fubini_study_kahler_pot = lambda p : (1 / np.pi) * np.log(np.sum(np.abs(p) ** 2))
+    fs_metric = nd.Hessian(fubini_study_kahler_pot) (point)
+    dx = np.gradient(to_good_coordinates(point))
+    wedge = lambda x, y : np.kron(x, y) - np.kron(y, x)
+    wedge_prod = wedge(dx, np.conj(dx)).reshape((5,5))
+    return (1.j / 2) * np.einsum('ij,ij', fs_metric, wedge_prod)
+
+affine_coord = lambda p : np.isclose(p, np.complex(1, 0)) 
 
 def to_good_coordinates(point):
     """accepts point in affine patch"""
     x = np.copy(point)
-    max_dq_index= find_max_dq_coord_index(point) 
-    exclude_max_dq_index = (x != x[max_dq_index]) & (x != complex(1, 0))
-    x[max_dq_index] = (-1 + np.sum((-1) * x[exclude_max_dq_index] ** 5)) ** (1/5)
+    max_dq_index = find_max_dq_coord_index(point) 
+    exclude_max_dq_index = (x != x[max_dq_index]) & (np.isclose(x, np.complex(1, 0)) == False) 
+    x[exclude_max_dq_index == False] = 0 
     return x
 
 def find_max_dq_coord_index(point):
     """accepts point in affine patch"""
     dq_abs = lambda p : np.absolute([5 * z ** 4 for z in p])
     dq_abs_max_index = lambda func, p : np.argmax(np.ma.array(func(p),
-        mask=p==np.complex(1, 0))) 
+        mask=np.isclose(p,np.complex(1, 0)) ))
     return dq_abs_max_index(dq_abs, point)
 
 def to_affine_patch(point):
     max_norm_coord = lambda p : p[np.argmax(np.absolute(p))]
     return point / max_norm_coord(point)
 
-def find_kahler_form(point):
-    pass
-
-def compute_gradient(point):
-    pass
-
-def fubini_study_kahler_form(point):
-    pass
-
 def weights(n_p, sample_points):
     """ (STUB) """
-    fubini_study_kahler_pot = lambda p : (1 / np.pi) * np.log(np.sum(np.abs(p) ** 2))
-    
     return np.ones(n_p, dtype=np.float)
 
 def generate_quintic_point_weights(k):
