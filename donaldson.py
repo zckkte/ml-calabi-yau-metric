@@ -13,8 +13,6 @@ point_weight_dtype = np.dtype([
     ('weight', np.float64) 
 ])
 
-def eval_sections(sections, point):
-    return np.fromiter(map(lambda monomial: monomial(point), sections), dtype=complex)
 
 def basis_size(k):
     return int(comb(COORDINATES + k - 1, k) if k < COORDINATES \
@@ -53,13 +51,13 @@ def weight(point):
     return (5 ** -2) * np.abs(z_j) ** (-8) * np.linalg.det(w) ** (-1)
 
 def find_kahler_form(point, z_j):
-    jac = jacobian(point, z_j)
+    jac = np.transpose(jacobian(point, z_j))
     jac_bar = np.conj(jac)
     w_fs_form = fubini_study_kahler_form(point)
     return np.einsum('ia,ij,jb -> ab', jac, w_fs_form, jac_bar)
 
 def jacobian(z, z_j):
-    select = (z != z_j) & (np.isclose(z, np.complex(1, 0 )) == False)
+    select = (z != z_j) & (affine_coord(z) == False)
     partials = -(z[select] / z_j) ** 4
     return np.array([
         [0, partials[0], 1, 0, 0 ], 
@@ -70,10 +68,7 @@ def jacobian(z, z_j):
 def fubini_study_kahler_form(point):
     fubini_study_kahler_pot = lambda p : (1 / np.pi) * np.log(np.sum(np.abs(p) ** 2))
     fs_metric = nd.Hessian(fubini_study_kahler_pot) (point)
-    dx = np.gradient(to_good_coordinates(point))
-    wedge = lambda x, y : np.kron(x, y) - np.kron(y, x)
-    wedge_prod = wedge(dx, np.conj(dx)).reshape((5,5))
-    return (1.j / 2) * np.einsum('ij,ij', fs_metric, wedge_prod)
+    return fs_metric
 
 affine_coord = lambda p : np.isclose(p, np.complex(1, 0)) 
 
@@ -81,7 +76,7 @@ def to_good_coordinates(point):
     """accepts point in affine patch"""
     x = np.copy(point)
     max_dq_index = find_max_dq_coord_index(point) 
-    exclude_max_dq_index = (x != x[max_dq_index]) & (np.isclose(x, np.complex(1, 0)) == False) 
+    exclude_max_dq_index = (x != x[max_dq_index]) & (affine_coord(x) == False) 
     x[exclude_max_dq_index == False] = 0 
     return x
 
@@ -96,17 +91,17 @@ def to_affine_patch(point):
     max_norm_coord = lambda p : p[np.argmax(np.absolute(p))]
     return point / max_norm_coord(point)
 
-def weights(n_p, sample_points):
-    """ (STUB) """
-    return np.ones(n_p, dtype=np.float)
-
 def generate_quintic_point_weights(k):
-    """ Generates a structured array of points (on fermat quintic) and associated integration weights """
+    """ 
+    Generates a structured array of points (on fermat quintic in affine coordinates)
+        and associated integration weights 
+    """
     n_k = basis_size(k)
     n_p = 10 * n_k ** 2 + 50000
     point_weights = np.zeros((n_p), dtype=point_weight_dtype)
     sample_points = sample_quintic_points(n_p)
-    point_weights['point'], point_weights['weight'] = sample_points, weights(n_p, sample_points)
+    weights = np.vectorize(weight, signature="(m)->()")(sample_points)
+    point_weights['point'], point_weights['weight'] = sample_points, weights
 
     return point_weights, monomials(k) 
 
@@ -117,10 +112,14 @@ def monomials(k):
         on the complex projection space $P^4$ constrained to the fermat quintic 
     """
     start_index = int(comb(k - 1, k - COORDINATES)) if k >= COORDINATES else None 
-    monomial_index_iter = islice(combinations_with_replacement(range(COORDINATES), k), start_index, None)
+    monomial_index_iter = islice(combinations_with_replacement(range(COORDINATES), k), 
+        start_index, None)
     for select_indices in monomial_index_iter:
         yield partial(lambda z, select_indices : np.prod(np.take(z, select_indices)), 
             select_indices=list(select_indices)) 
+
+def eval_sections(sections, point):
+    return np.fromiter(map(lambda monomial: monomial(point), sections), dtype=complex)
 
 def donaldson(k, generator=generate_quintic_point_weights):
     """ Calculates the numerical Calabi-Yau metric on the ambient space $P^4$ """
