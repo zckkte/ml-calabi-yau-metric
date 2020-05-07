@@ -13,7 +13,6 @@ point_weight_dtype = np.dtype([
     ('weight', np.float64) 
 ])
 
-
 def basis_size(k):
     return int(comb(COORDINATES + k - 1, k) if k < COORDINATES \
         else (comb(COORDINATES + k - 1, k) - comb(k - 1, k - COORDINATES)))
@@ -46,7 +45,7 @@ def sample_quintic_points(n_p):
         range(int(n_p / COORDINATES)), []))
 
 def weight(point):
-    z_j = point[find_max_dq_coord_index(point)] 
+    z_j = max_dq_coord (point)
     w = find_kahler_form(point, z_j)
     return (5 ** -2) * np.abs(z_j) ** (-8) * np.linalg.det(w) ** (-1)
 
@@ -80,6 +79,8 @@ def to_good_coordinates(point):
     exclude_max_dq_index = (x != x[max_dq_index]) & (affine_coord(x) == False) 
     x[exclude_max_dq_index == False] = 0 
     return x
+
+max_dq_coord = lambda p : p[find_max_dq_coord_index(p)]  
 
 def find_max_dq_coord_index(point):
     """accepts point in affine patch"""
@@ -125,7 +126,7 @@ def eval_sections(sections, point):
 
 def eval_sections_partial(k, point):
     start_index = int(comb(k - 1, k - COORDINATES)) if k >= COORDINATES else None 
-    monomials = np.fromiter(combinations_with_replacement(range(COORDINATES), 2))[start_index::]
+    monomials = np.fromiter(combinations_with_replacement(range(COORDINATES), k))[start_index::]
     partial_sections = np.zero(COORDINATES, dtype=complex)
     for i in range(COORDINATES): 
         for j in range(basis_size(k)): #monomials
@@ -139,24 +140,30 @@ def eval_sections_partial(k, point):
                 partial_sections[i] += tmp * occurrences/ point[i]
     return partial_sections
 
+def triu_exclude_diag(shape, value, dtype=int):
+    n_k, _ = shape
+    arr = np.zeros((n_k, n_k), dtype=dtype)
+    for i in range(n_k - 1):
+        for j in range(i + 1, n_k):
+            arr[i][j] = value
+    return arr
+
+def is_close_invertible(arr):
+    dim, _ = arr.shape
+    arr_inverse = np.linalg.inv(arr)
+    prod = np.einsum('ij,jk', arr, arr_inverse)
+    return np.all(np.isclose(prod, np.eye(dim, dtype=complex), atol=1e-12))
+
 def initial_balanced_metric(n_k):
-
-    i = 0
-    while i < 10:
-        h_initial = np.zeros((n_k, n_k), dtype=complex)
-        for i in range(n_k - 1):
-            for j in range(i + 1, n_k):
-                h_initial[i][j] = np.random.rand(1, 2).astype(float).view(np.complex128)
+    for _ in range(10):
+        h_initial = triu_exclude_diag((n_k, n_k),  
+            value=np.random.rand(1, 2).astype(float).view(np.complex128),
+            dtype=complex)
         h_initial += np.conjugate(h_initial.T)
-
         np.fill_diagonal(h_initial, np.random.rand(n_k))
 
-        h_inverse = np.linalg.inv(h_initial)
-        prod = np.einsum('ij,jk', h_initial, h_inverse)
-        if np.all(np.isclose(prod, np.eye(n_k, dtype=complex), atol=1e-12)):
+        if is_close_invertible(h_initial):
             break
-        i+=1
-
     return h_initial
 
 def donaldson(k, generator=generate_quintic_point_weights):
@@ -182,7 +189,7 @@ def t_operator(k, n_k, h_n, point_weights):
     return t_acc
 
 def pull_back_metric(k, h_balanced, point):
-    z_j = point[find_max_dq_coord_index(point)] 
+    z_j = max_dq_coord(point)
     jac = jacobian(point, z_j)
     s_p = eval_sections(monomials(k), point) 
     partial_sp = eval_sections_partial(k, point)
@@ -196,27 +203,19 @@ def pull_back_metric(k, h_balanced, point):
 
 def sigma(k, n_t, g, generator=generate_quintic_point_weights):
     point_weights = generate_quintic_point_weights(k, n_t)
-    g_at_point = g(pw)
     volume_cy = (1 / n_t) * np.sum(point_weights['weight']) # sum weights 
-    volume_k = (1 / n_t) * np.sum ( np.vectorize(vol_k_integrand(g_at_point))(point_weights) )
+    volume_k = (1 / n_t) * np.sum ( np.vectorize(vol_k_integrand)(point_weights, g) )
 
-    sigma_acc = 0
-    for pw in point_weights:
-        sigma_acc += np.abs(1 - quintic_kahler_form_determinant(g_at_point(pw), pw) 
-            * volume_cy / (omega_wedge_omega_conj(pw['point']) * volume_k ) * pw['weight'])
+    return (n_t * volume_cy) ** (-1) * reduce(lambda pw, acc : 
+        acc + np.abs(1 - quintic_kahler_form_determinant(g(pw)) 
+                * volume_cy / (omega_wedge_omega_conj(pw['point']) * volume_k ) * pw['weight']), 0)
 
-    return (1 / (n_t * volume_cy)) * sigma_acc
+quintic_kahler_form_determinant = lambda g : np.linalg.det(g) #prefactors?
 
-def quintic_kahler_form_determinant(g, pw):
-    return np.linalg.det(g) #prefactors?
+omega_wedge_omega_conj = lambda point : 5 ** (-2) * np.abs(max_dq_coord(point)) ** (-8)
 
-def omega_wedge_omega_conj(pw):
-    point = pw['point']
-    z_j = point[find_max_dq_coord_index(point)] 
-    return 5 ** (-2) * np.abs(z_j) ** (-8)
-
-def vol_k_integrand(g, pw):
-    omega3 = quintic_kahler_form_determinant (g, pw['point'])
+def vol_k_integrand(pw, g):
+    omega3 = quintic_kahler_form_determinant (g)
     omega_squared = omega_wedge_omega_conj(pw['point'])
     return omega3 / omega_squared  * pw['weight']
 
@@ -224,7 +223,6 @@ if __name__ == "__main__":
     k = 2
     n_t = 500000
     h_balanced = donaldson(k)
-    g = lambda pw : pull_back_metric(k, h_balanced, pw)
-    measure = sigma(k, n_t, g)
+    measure = sigma(k, n_t, lambda pw : pull_back_metric(k, h_balanced, pw))
     print(h_balanced)
     print(measure)
