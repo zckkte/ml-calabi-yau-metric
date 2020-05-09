@@ -93,7 +93,7 @@ def to_affine_patch(point):
     max_norm_coord = lambda p : p[np.argmax(np.absolute(p))]
     return point / max_norm_coord(point)
 
-def generate_quintic_point_weights(k,  n_t= -1):
+def generate_quintic_point_weights(k, n_t=-1):
     """ 
     Generates a structured array of points (on fermat quintic in affine coordinates)
         and associated integration weights 
@@ -122,23 +122,11 @@ def monomials(k):
             select_indices=list(select_indices)) 
 
 def eval_sections(sections, point):
-    return np.fromiter(map(lambda monomial: monomial(point), sections), dtype=complex)
+    return np.array(list(map(lambda monomial : np.squeeze(monomial(point)), sections)))
 
-def eval_sections_partial(k, point):
-    start_index = int(comb(k - 1, k - COORDINATES)) if k >= COORDINATES else None 
-    monomials = np.fromiter(combinations_with_replacement(range(COORDINATES), k))[start_index::]
-    partial_sections = np.zero(COORDINATES, dtype=complex)
-    for i in range(COORDINATES): 
-        for j in range(basis_size(k)): #monomials
-            tmp = 1
-            occurrences = 0
-            for m in range(k):
-                tmp = tmp * point[monomials[j][m]]
-                if monomials[j][m] == i:
-                    occurrences += 1
-            if occurrences != 0:
-                partial_sections[i] += tmp * occurrences/ point[i]
-    return partial_sections
+def monomial_partials(k):
+    for section in monomials(k):
+        yield nd.Jacobian(lambda p : section(p))
 
 def triu_exclude_diag(shape, value, dtype=int):
     n_k, _ = shape
@@ -148,7 +136,7 @@ def triu_exclude_diag(shape, value, dtype=int):
             arr[i][j] = value
     return arr
 
-def is_close_invertible(arr):
+def is_invertible(arr):
     dim, _ = arr.shape
     arr_inverse = np.linalg.inv(arr)
     prod = np.einsum('ij,jk', arr, arr_inverse)
@@ -162,11 +150,13 @@ def initial_balanced_metric(n_k):
         h_initial += np.conjugate(h_initial.T)
         np.fill_diagonal(h_initial, np.random.rand(n_k))
 
-        if is_close_invertible(h_initial):
+        if is_invertible(h_initial):
             break
     return h_initial
 
-def donaldson(k, generator=generate_quintic_point_weights):
+read_point_weights_from_file = lambda file_name : (lambda _ : np.fromfile(file_name, dtype=point_weight_dtype))
+
+def donaldson(k, max_iterations=10, generator=generate_quintic_point_weights):
     """ Calculates the numerical Calabi-Yau metric on the ambient space $P^4$ """
     point_weights = generator(k)
     n_k = basis_size(k)
@@ -174,10 +164,10 @@ def donaldson(k, generator=generate_quintic_point_weights):
     h_0 = initial_balanced_metric(n_k)
 
     volume_cy = lambda pw : (1 / n_p) * np.sum(pw['weight']) # sum weights
-    t_operator_func = lambda h_n : (n_k / volume_cy(point_weights)) * t_operator(k, n_k, h_n, point_weights)
+    t_operator_func = lambda h_n : (n_k / (n_p * volume_cy(point_weights))) * t_operator(k, n_k, h_n, point_weights)
 
     h_balanced = reduce(lambda h_n, _ : np.transpose(np.linalg.inv(t_operator_func(h_n))), \
-        range(1, DONALDSON_MAX_ITERATIONS), h_0)
+        range(1, max_iterations), h_0)
     return h_balanced
 
 def t_operator(k, n_k, h_n, point_weights):
@@ -192,37 +182,40 @@ def pull_back_metric(k, h_balanced, point):
     z_j = max_dq_coord(point)
     jac = jacobian(point, z_j)
     s_p = eval_sections(monomials(k), point) 
-    partial_sp = eval_sections_partial(k, point)
+    partial_sp = eval_sections(monomial_partials(k), point)
     partial_sp_conj = np.conjugate(partial_sp)
     kahler_pot_partial_0 = np.log(np.einsum('ij,i,j', h_balanced, s_p, np.conjugate(s_p)))
-    kahler_pot_partial_1 = np.einsum('ab,ia,b', h_balanced, partial_sp, np.conjugate(s_p))
-    kahler_pot_partial_2 = np.einsum('ab,ia,jb', h_balanced, partial_sp, partial_sp_conj)
+    kahler_pot_partial_1 = np.einsum('ab,ai,b', h_balanced, partial_sp, np.conjugate(s_p))
+    kahler_pot_partial_2 = np.einsum('ab,ai,bj', h_balanced, partial_sp, partial_sp_conj)
     g_tilde = ((k * np.pi)**(-1) * (kahler_pot_partial_0 * kahler_pot_partial_2 
         - kahler_pot_partial_0 ** 2 * kahler_pot_partial_1 * np.conjugate(kahler_pot_partial_1 )))
     return np.einsum('ai,ij,bj', np.conjugate(jac), g_tilde, jac)
 
 def sigma(k, n_t, g, generator=generate_quintic_point_weights):
-    point_weights = generate_quintic_point_weights(k, n_t)
+    point_weights = generator(k, n_t)
     volume_cy = (1 / n_t) * np.sum(point_weights['weight']) # sum weights 
     volume_k = (1 / n_t) * np.sum ( np.vectorize(vol_k_integrand)(point_weights, g) )
 
     return (n_t * volume_cy) ** (-1) * reduce(lambda pw, acc : 
-        acc + np.abs(1 - quintic_kahler_form_determinant(g(pw)) 
-                * volume_cy / (omega_wedge_omega_conj(pw['point']) * volume_k ) * pw['weight']), 0)
+        acc + np.abs(1 - quintic_kahler_form_determinant(g(pw['point'])) 
+                * volume_cy / (omega_wedge_omega_conj(pw['point']) * volume_k ) * pw['weight']), point_weights, 0)
 
 quintic_kahler_form_determinant = lambda g : np.linalg.det(g) #prefactors?
 
 omega_wedge_omega_conj = lambda point : 5 ** (-2) * np.abs(max_dq_coord(point)) ** (-8)
 
-def vol_k_integrand(pw, g):
-    omega3 = quintic_kahler_form_determinant (g)
-    omega_squared = omega_wedge_omega_conj(pw['point'])
-    return omega3 / omega_squared  * pw['weight']
+def vol_k_integrand(point_weight, g):
+    point, weight = point_weight
+    omega3 = quintic_kahler_form_determinant (g(point))
+    omega_squared = omega_wedge_omega_conj(point)
+    return (omega3 / omega_squared)  * weight
 
 if __name__ == "__main__":
     k = 2
     n_t = 500000
-    h_balanced = donaldson(k)
-    measure = sigma(k, n_t, lambda pw : pull_back_metric(k, h_balanced, pw))
+    #h_balanced = donaldson(k, generator=read_point_weights_from_file('pw_2_15.dat'))
+    h_balanced = np.fromfile('h_balanced_k_2_15.dat').reshape((15*15, 2)).view(np.complex128).reshape(15,15)
+    measure = sigma(k, n_t, lambda pw : pull_back_metric(k, h_balanced, pw), \
+        generator= lambda k, n_t : read_point_weights_from_file('pw_2_15.dat')(k)[::n_t])
     print(h_balanced)
     print(measure)
