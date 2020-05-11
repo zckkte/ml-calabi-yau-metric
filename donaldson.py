@@ -56,12 +56,12 @@ def find_kahler_form(point, z_j):
     return np.einsum('ia,ij,jb -> ab', jac, w_fs_form, jac_bar)
 
 def jacobian(z, z_j):
-    jacobian = np.zeros((3,5), dtype=complex)
+    jacobian = np.zeros((COORDINATES-2,COORDINATES), dtype=complex)
     select = (z != z_j) & (affine_coord(z) == False)
     partials = -(z[select] / z_j) ** 4
     partial_i = np.where(z == z_j)[0][0]
     diagonal_i = np.where(select)[0]
-    for i in range(3): #manifold specific
+    for i in range(COORDINATES-2): #manifold specific
         jacobian[i][diagonal_i[i]] = 1
         jacobian[i][partial_i] = partials[i]
     return jacobian
@@ -191,31 +191,32 @@ def pull_back_metric(k, h_balanced, point):
         - kahler_pot_partial_0 ** 2 * kahler_pot_partial_1 * np.conjugate(kahler_pot_partial_1 )))
     return np.einsum('ai,ij,bj', np.conjugate(jac), g_tilde, jac)
 
-def sigma(k, n_t, g, generator=generate_quintic_point_weights):
+def sigma(k, n_t, g_pull_back, generator=generate_quintic_point_weights):
     point_weights = generator(k, n_t)
     volume_cy = (1 / n_t) * np.sum(point_weights['weight']) # sum weights 
-    volume_k = (1 / n_t) * np.sum ( np.vectorize(vol_k_integrand)(point_weights, g) )
+    volume_k = (1 / n_t) * np.sum ( np.vectorize(vol_k_integrand, signature='(),()->()')(point_weights, g_pull_back) )
 
-    return (n_t * volume_cy) ** (-1) * reduce(lambda pw, acc : 
-        acc + np.abs(1 - quintic_kahler_form_determinant(g(pw['point'])) 
+    return (n_t * volume_cy) ** (-1) * reduce(lambda acc, pw : \
+        acc + np.abs(1 - quintic_kahler_form_determinant(g_pull_back(pw['point'])) \
                 * volume_cy / (omega_wedge_omega_conj(pw['point']) * volume_k ) * pw['weight']), point_weights, 0)
 
 quintic_kahler_form_determinant = lambda g : np.linalg.det(g) #prefactors?
 
 omega_wedge_omega_conj = lambda point : 5 ** (-2) * np.abs(max_dq_coord(point)) ** (-8)
 
-def vol_k_integrand(point_weight, g):
+def vol_k_integrand(point_weight, g_pull_back):
     point, weight = point_weight
-    omega3 = quintic_kahler_form_determinant (g(point))
+    omega3 = quintic_kahler_form_determinant (g_pull_back(point))
     omega_squared = omega_wedge_omega_conj(point)
-    return (omega3 / omega_squared)  * weight
+    return (omega3 / omega_squared) * weight
 
 if __name__ == "__main__":
     k = 2
     n_t = 500000
     #h_balanced = donaldson(k, generator=read_point_weights_from_file('pw_2_15.dat'))
-    h_balanced = np.fromfile('h_balanced_k_2_15.dat').reshape((15*15, 2)).view(np.complex128).reshape(15,15)
+    h_balanced = (np.fromfile('h_balanced_k_2_15.dat').reshape((15*15, 2))
+        .view(np.complex128).reshape(15,15))
     measure = sigma(k, n_t, lambda pw : pull_back_metric(k, h_balanced, pw), \
-        generator= lambda k, n_t : read_point_weights_from_file('pw_2_15.dat')(k)[::n_t])
-    print(h_balanced)
-    print(measure)
+        generator= lambda k, n_t : read_point_weights_from_file('pw_2_15.dat')(k)[:n_t])
+    print(h_balanced) 
+    print('sigma=', measure) 
