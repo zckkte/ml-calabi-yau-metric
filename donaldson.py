@@ -45,22 +45,25 @@ def sample_quintic_points(n_p):
         range(int(n_p / COORDINATES)), []))
 
 def weight(point):
-    z_j = max_dq_coord (point)
-    w = find_kahler_form(point, z_j)
+    w = find_kahler_form(point)
+    z_j = elim_z_j(point)
     return (5 ** -2) * np.abs(z_j) ** (-8) * np.linalg.det(w) ** (-1)
 
-def find_kahler_form(point, z_j):
-    jac = np.transpose(jacobian(point, z_j))
+def find_kahler_form(point):
+    jac = np.transpose(jacobian(point))
     jac_bar = np.conj(jac)
     w_fs_form = fubini_study_kahler_form(point)
     return np.einsum('ia,ij,jb -> ab', jac, w_fs_form, jac_bar)
 
-def jacobian(z, z_j):
-    jacobian = np.zeros((COORDINATES-2,COORDINATES), dtype=complex)
-    select = (z != z_j) & (affine_coord(z) == False)
-    partials = -(z[select] / z_j) ** 4
-    partial_i = np.where(z == z_j)[0][0]
+elim_z_j = lambda z : (-1) - np.sum(z[good_coord_mask(z)] ** 5)
+
+def jacobian(z):
+    select = good_coord_mask(z)
+    partials = -(z[select] / elim_z_j(z)) ** 4
+    partial_i = np.where(z == z[find_max_dq_coord_index(z)])[0][0]
     diagonal_i = np.where(select)[0]
+
+    jacobian = np.zeros((COORDINATES-2,COORDINATES), dtype=complex)
     for i in range(COORDINATES-2): #manifold specific
         jacobian[i][diagonal_i[i]] = 1
         jacobian[i][partial_i] = partials[i]
@@ -72,13 +75,7 @@ def fubini_study_kahler_form(point):
 
 affine_coord = lambda p : np.isclose(p, np.complex(1, 0)) 
 
-def to_good_coordinates(point):
-    """accepts point in affine patch"""
-    x = np.copy(point)
-    max_dq_index = find_max_dq_coord_index(point) 
-    exclude_max_dq_index = (x != x[max_dq_index]) & (affine_coord(x) == False) 
-    x[exclude_max_dq_index == False] = 0 
-    return x
+good_coord_mask = lambda x: (x != x[find_max_dq_coord_index(x)]) & (affine_coord(x) == False) 
 
 max_dq_coord = lambda p : p[find_max_dq_coord_index(p)]  
 
@@ -154,8 +151,6 @@ def initial_balanced_metric(n_k):
             break
     return h_initial
 
-read_point_weights_from_file = lambda file_name : (lambda _ : np.fromfile(file_name, dtype=point_weight_dtype))
-
 def donaldson(k, max_iterations=10, generator=generate_quintic_point_weights):
     """ Calculates the numerical Calabi-Yau metric on the ambient space $P^4$ """
     point_weights = generator(k)
@@ -179,8 +174,6 @@ def t_operator(k, n_k, h_n, point_weights):
     return t_acc
 
 def pull_back_metric(k, h_balanced, point):
-    z_j = max_dq_coord(point)
-    jac = jacobian(point, z_j)
     s_p = eval_sections(monomials(k), point) 
     partial_sp = eval_sections(monomial_partials(k), point)
     partial_sp_conj = np.conjugate(partial_sp)
@@ -188,21 +181,28 @@ def pull_back_metric(k, h_balanced, point):
     kahler_pot_partial_1 = np.einsum('ab,ai,b', h_balanced, partial_sp, np.conjugate(s_p))
     kahler_pot_partial_2 = np.einsum('ab,ai,bj', h_balanced, partial_sp, partial_sp_conj)
     g_tilde = ((k * np.pi)**(-1) * (kahler_pot_partial_0 * kahler_pot_partial_2 
-        - kahler_pot_partial_0 ** 2 * kahler_pot_partial_1 * np.conjugate(kahler_pot_partial_1 )))
+        - (kahler_pot_partial_0 ** 2) * kahler_pot_partial_1 * np.conjugate(kahler_pot_partial_1 )))
+    jac = jacobian(point)
     return np.einsum('ai,ij,bj', np.conjugate(jac), g_tilde, jac)
 
 def sigma(k, n_t, g_pull_back, generator=generate_quintic_point_weights):
     point_weights = generator(k, n_t)
-    volume_cy = (1 / n_t) * np.sum(point_weights['weight']) # sum weights 
-    volume_k = (1 / n_t) * np.sum ( np.vectorize(vol_k_integrand, signature='(),()->()')(point_weights, g_pull_back) )
+    vol_cy = volume_cy(n_t, point_weights)
+    vol_k = volume_k(n_t, point_weights, g_pull_back)
 
-    return (n_t * volume_cy) ** (-1) * reduce(lambda acc, pw : \
-        acc + np.abs(1 - quintic_kahler_form_determinant(g_pull_back(pw['point'])) \
-                * volume_cy / (omega_wedge_omega_conj(pw['point']) * volume_k ) * pw['weight']), point_weights, 0)
+    return (n_t * vol_cy) ** (-1) * reduce(lambda acc, pw : 
+        acc + np.abs(1 - quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
+            * vol_cy / (omega_wedge_omega_conj(pw['point']) * vol_k ) * pw['weight']), 
+        point_weights, 0)
+
+volume_cy = lambda n_t, point_weights : (1 / n_t) * np.sum(point_weights['weight']) # sum weights 
+
+volume_k = (lambda n_t, point_weights, g_pull_back : 
+    (1 / n_t) * np.sum ( np.vectorize(vol_k_integrand, signature='(),()->()')(point_weights, g_pull_back) ))
 
 quintic_kahler_form_determinant = lambda g : np.linalg.det(g) #prefactors?
 
-omega_wedge_omega_conj = lambda point : 5 ** (-2) * np.abs(max_dq_coord(point)) ** (-8)
+omega_wedge_omega_conj = lambda point : 5 ** (-2) * np.abs(elim_z_j(point)) ** (-8)
 
 def vol_k_integrand(point_weight, g_pull_back):
     point, weight = point_weight
@@ -210,12 +210,37 @@ def vol_k_integrand(point_weight, g_pull_back):
     omega_squared = omega_wedge_omega_conj(point)
     return (omega3 / omega_squared) * weight
 
+def global_ricci_scalar (k, n_t, g_pull_back, generator=generate_quintic_point_weights):
+    point_weights = generator(k, n_t)
+    vol_cy = volume_cy(n_t, point_weights)
+    vol_k_3 = volume_k(n_t, point_weights, g_pull_back) ** (1/3)
+
+    return (vol_k_3 / (n_t * vol_cy)) * reduce(lambda pw, acc :
+        acc + quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
+            / omega_wedge_omega_conj(pw['point']) * ricci_scalar_k(pw['point'], g_pull_back) * pw['weight'], 
+        point_weights, 0.)
+
+def ricci_scalar_k(point, g_pull_back):
+    """STUB"""
+    return 0.
+
+"""helpers"""
+
+read_point_weights_from_file = lambda file_name : (lambda _ : np.fromfile(file_name, dtype=point_weight_dtype))
+
+def save_generate_point_weights(k, file_name='sample_data'):
+    np.save("%s_%d" % (file_name, k), generate_quintic_point_weights(k))
+
+def load_h_balanced(file_name, k):
+    dim = basis_size(k)
+    return (np.fromfile().reshape((dim * dim, k))
+        .view(np.complex128).reshape(dim, dim))
+
 if __name__ == "__main__":
     k = 2
     n_t = 500000
     #h_balanced = donaldson(k, generator=read_point_weights_from_file('pw_2_15.dat'))
-    h_balanced = (np.fromfile('h_balanced_k_2_15.dat').reshape((15*15, 2))
-        .view(np.complex128).reshape(15,15))
+    h_balanced = load_h_balanced('h_balanced_k_2_15.dat', k)
     measure = sigma(k, n_t, lambda pw : pull_back_metric(k, h_balanced, pw), \
         generator= lambda k, n_t : read_point_weights_from_file('pw_2_15.dat')(k)[:n_t])
     print(h_balanced) 
