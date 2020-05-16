@@ -1,9 +1,10 @@
-import numpy as np
-from scipy.special import comb
-from scipy import optimize
-from itertools import combinations_with_replacement, islice
-from functools import * 
+import argparse
 import numdifftools as nd
+import numpy as np
+from functools import * 
+from itertools import combinations_with_replacement, islice
+from scipy.special import comb
+import datetime
 
 COORDINATES = 5
 DONALDSON_MAX_ITERATIONS = 10
@@ -19,30 +20,6 @@ def basis_size(k):
 
 def compose(*functions):
     return reduce(lambda f, g: lambda x: f(g(x)), functions, lambda x: x)
-
-def sample_ambient_pair():
-    """two distinct random points in ambient $P^4$ space"""
-    n = 9
-    p, q = np.split(np.random.normal(0, 1, 2 * (n + 1)), 2)
-    normalise = lambda r : r / (np.sum(r ** 2) ** (0.5))
-    # map to P^4
-    to_complex_proj = (lambda v : v.reshape((5, 2)).astype(float)
-        .view(np.complex128)
-        .reshape(5))
-    to_ambient = compose(to_complex_proj, normalise)
-    return to_ambient(p), to_ambient(q)
-
-def sample_quintic():
-    """samples 5 points from fermat quintic in affine coordinates"""
-    p, q = sample_ambient_pair()
-    quintic_intersect_coeff = lambda p, q : [ np.sum(comb(COORDINATES, i) * p ** (COORDINATES - i) * q ** i) 
-        for i in range(COORDINATES + 1) ] 
-    roots = np.roots(quintic_intersect_coeff(q, p))
-    return [ to_affine_patch(p + q * t) for t in roots ]
-
-def sample_quintic_points(n_p):
-    return np.concatenate(reduce(lambda acc, _ : acc + [sample_quintic()], 
-        range(int(n_p / COORDINATES)), []))
 
 def weight(point):
     w = find_kahler_form(point)
@@ -70,8 +47,8 @@ def jacobian(z):
     return jacobian
 
 def fubini_study_kahler_form(point):
-    fubini_study_kahler_pot = lambda p : (1 / np.pi) * np.log(np.sum(np.abs(p) ** 2))
-    return nd.Hessian(fubini_study_kahler_pot) (point)
+    return ((1 / np.pi) * (np.sum(np.abs(point) ** 2) ) ** (-2) 
+        * ( (np.sum(np.abs(point) ** 2)) * np.eye(COORDINATES) - np.outer(np.conj(point), point) ))
 
 affine_coord = lambda p : np.isclose(p, np.complex(1, 0)) 
 
@@ -104,6 +81,30 @@ def generate_quintic_point_weights(k, n_t=-1):
     point_weights['point'], point_weights['weight'] = sample_points, weights
 
     return point_weights
+
+def sample_ambient_pair():
+    """two distinct random points in ambient $P^4$ space"""
+    n = 9
+    p, q = np.split(np.random.normal(0, 1, 2 * (n + 1)), 2)
+    normalise = lambda r : r / (np.sum(r ** 2) ** (0.5))
+    # map to P^4
+    to_complex_proj = (lambda v : v.reshape((5, 2)).astype(float)
+        .view(np.complex128)
+        .reshape(5))
+    to_ambient = compose(to_complex_proj, normalise)
+    return to_ambient(p), to_ambient(q)
+
+def sample_quintic():
+    """samples 5 points from fermat quintic in affine coordinates"""
+    p, q = sample_ambient_pair()
+    quintic_intersect_coeff = lambda p, q : [ np.sum(comb(COORDINATES, i) * p ** (COORDINATES - i) * q ** i) 
+        for i in range(COORDINATES + 1) ] 
+    roots = np.roots(quintic_intersect_coeff(q, p))
+    return [ to_affine_patch(p + q * t) for t in roots ]
+
+def sample_quintic_points(n_p):
+    return np.concatenate(reduce(lambda acc, _ : acc + [sample_quintic()], 
+        range(int(n_p / COORDINATES)), []))
 
 def monomials(k):
     """ 
@@ -173,7 +174,7 @@ def t_operator(k, n_k, h_n, point_weights):
         t_acc += np.einsum('i,j', s_p, np.conjugate(s_p))  * p_w['weight'] / inner
     return t_acc
 
-def pull_back_metric(k, h_balanced, point):
+def pull_back(k, h_balanced, point):
     s_p = eval_sections(monomials(k), point) 
     partial_sp = eval_sections(monomial_partials(k), point)
     partial_sp_conj = np.conjugate(partial_sp)
@@ -185,44 +186,7 @@ def pull_back_metric(k, h_balanced, point):
     jac = jacobian(point)
     return np.einsum('ai,ij,bj', np.conjugate(jac), g_tilde, jac)
 
-def sigma(k, n_t, g_pull_back, generator=generate_quintic_point_weights):
-    point_weights = generator(k, n_t)
-    vol_cy = volume_cy(n_t, point_weights)
-    vol_k = volume_k(n_t, point_weights, g_pull_back)
-
-    return (n_t * vol_cy) ** (-1) * reduce(lambda acc, pw : 
-        acc + np.abs(1 - quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
-            * vol_cy / (omega_wedge_omega_conj(pw['point']) * vol_k ) * pw['weight']), 
-        point_weights, 0)
-
-volume_cy = lambda n_t, point_weights : (1 / n_t) * np.sum(point_weights['weight']) # sum weights 
-
-volume_k = (lambda n_t, point_weights, g_pull_back : 
-    (1 / n_t) * np.sum ( np.vectorize(vol_k_integrand, signature='(),()->()')(point_weights, g_pull_back) ))
-
-quintic_kahler_form_determinant = lambda g : np.linalg.det(g) #prefactors?
-
-omega_wedge_omega_conj = lambda point : 5 ** (-2) * np.abs(elim_z_j(point)) ** (-8)
-
-def vol_k_integrand(point_weight, g_pull_back):
-    point, weight = point_weight
-    omega3 = quintic_kahler_form_determinant (g_pull_back(point))
-    omega_squared = omega_wedge_omega_conj(point)
-    return (omega3 / omega_squared) * weight
-
-def global_ricci_scalar (k, n_t, g_pull_back, generator=generate_quintic_point_weights):
-    point_weights = generator(k, n_t)
-    vol_cy = volume_cy(n_t, point_weights)
-    vol_k_3 = volume_k(n_t, point_weights, g_pull_back) ** (1/3)
-
-    return (vol_k_3 / (n_t * vol_cy)) * reduce(lambda pw, acc :
-        acc + quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
-            / omega_wedge_omega_conj(pw['point']) * ricci_scalar_k(pw['point'], g_pull_back) * pw['weight'], 
-        point_weights, 0.)
-
-def ricci_scalar_k(point, g_pull_back):
-    """STUB"""
-    return 0.
+pull_back_determinant = lambda k, h_balanced, point : np.linalg.det(pull_back(k, h_balanced, point))
 
 """helpers"""
 
@@ -231,17 +195,16 @@ read_point_weights_from_file = lambda file_name : (lambda _ : np.fromfile(file_n
 def save_generate_point_weights(k, file_name='sample_data'):
     np.save("%s_%d" % (file_name, k), generate_quintic_point_weights(k))
 
-def load_h_balanced(file_name, k):
+def load_balanced_metric(file_name, k):
     dim = basis_size(k)
-    return (np.fromfile().reshape((dim * dim, k))
+    return (np.fromfile(file_name).reshape((dim * dim, k))
         .view(np.complex128).reshape(dim, dim))
 
 if __name__ == "__main__":
-    k = 2
-    n_t = 500000
-    #h_balanced = donaldson(k, generator=read_point_weights_from_file('pw_2_15.dat'))
-    h_balanced = load_h_balanced('h_balanced_k_2_15.dat', k)
-    measure = sigma(k, n_t, lambda pw : pull_back_metric(k, h_balanced, pw), \
-        generator= lambda k, n_t : read_point_weights_from_file('pw_2_15.dat')(k)[:n_t])
-    print(h_balanced) 
-    print('sigma=', measure) 
+    parser = argparse.ArgumentParser(description='Approximate the Calabi-Yau metric of the fermat quintic')
+    parser.add_argument('-k', type=int,required=True, default=2, help='order of fermat quintic sections')
+    parser.add_argument('-N', type=int, default=-1, help='number of sample points')
+    args = parser.parse_args()
+
+    p, _ = to_affine_patch(sample_ambient_pair())
+    print('g_%d(p)=%f' % pull_back_determinant(args.k, donaldson(args.k), p))
