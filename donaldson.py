@@ -202,8 +202,8 @@ def load_balanced_metric(file_name, k):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Approximate the Calabi-Yau metric of the fermat quintic')
-    parser.add_argument('-k', type=int,required=True, default=2, help='order of fermat quintic sections')
-    parser.add_argument('-N', type=int, default=-1, help='number of sample points')
+    parser.add_argument('-k', type=int,required=True, help='order of fermat quintic sections')
+    parser.add_argument('-N', type=int,required=True, default=-1, help='number of sample points')
     args = parser.parse_args()
 
     p, _ = to_affine_patch(sample_ambient_pair())
