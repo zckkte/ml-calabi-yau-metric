@@ -206,5 +206,6 @@ if __name__ == "__main__":
     parser.add_argument('-N', type=int,required=True, default=-1, help='number of sample points')
     args = parser.parse_args()
 
-    p, _ = to_affine_patch(sample_ambient_pair())
-    print('g_%d(p)=%f' % pull_back_determinant(args.k, donaldson(args.k), p))
+    p, _ = sample_ambient_pair()
+    z = to_affine_patch(p)
+    print('g_%d(p)=%f' % (args.k, pull_back_determinant(args.k, donaldson(args.k), z)))
