@@ -1,5 +1,6 @@
 import donaldson as don
 import numpy as np
+import numdifftools as nd
 from functools import * 
 
 def sigma(k, n_t, g_pull_back, generator=don.generate_quintic_point_weights):
@@ -12,19 +13,49 @@ def sigma(k, n_t, g_pull_back, generator=don.generate_quintic_point_weights):
             * vol_cy / (omega_wedge_omega_conj(pw['point']) * vol_k ) * pw['weight']), 
         point_weights, 0)
 
-def global_ricci_scalar (k, n_t, g_pull_back, generator=don.generate_quintic_point_weights):
+def global_ricci_scalar (k, n_t, h_balanced, generator=don.generate_quintic_point_weights):
     point_weights = generator(k, n_t)
+    g_pull_back = lambda p : don.pull_back(k, h_balanced, p)
     vol_cy = volume_cy(n_t, point_weights)
     vol_k_3 = volume_k(n_t, point_weights, g_pull_back) ** (1/3)
 
-    return (vol_k_3 / (n_t * vol_cy)) * reduce(lambda pw, acc :
+    return (vol_k_3 / (n_t * vol_cy)) * reduce(lambda acc, pw :
         acc + quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
-            / omega_wedge_omega_conj(pw['point']) * ricci_scalar_k(pw['point'], g_pull_back) * pw['weight'], 
+            / omega_wedge_omega_conj(pw['point']) * ricci_scalar_k(k, h_balanced, g_pull_back, pw['point']) * pw['weight'], 
         point_weights, 0.)
 
-def ricci_scalar_k(point, g_pull_back):
+def ricci_scalar_k(k, h_balanced, g_pull_back, point):
+    g_kahler = don.kahler_metric(k, h_balanced, point)
+    partial_g_k = compute_kahler_metric_partial(k, h_balanced, point)
+    double_partial_g_k = compute_kahler_metric_double_partial(k, h_balanced, point)
+    jac = np.transpose(don.jacobian(point))
+    jac_bar = np.conj(jac)
+    partial_jac = nd.Gradient(lambda x : don.jacobian(x))(point)
+    partial_jac_conj = np.conj(partial_jac)
+
+    partial_g_pb = (np.einsum('kai,ij,bj->kab', partial_jac, g_kahler, jac_bar)
+        + np.einsum('ai,kij,bj->kab', jac, partial_g_k, jac_bar))
+    double_partial_g_pb = (np.einsum('kai,ij,hbj', partial_jac, g_kahler, partial_jac_conj) 
+        + np.einsum('mai,mij,bj', partial_jac, partial_g_k, jac_bar) 
+        + np.einsum('ai,ijnm,bj', jac, double_partial_g_k, jac_bar) 
+        + np.einsum('ai,nij,mbj', jac, partial_g_k, partial_jac_conj))
+
+    g_pb_inv = np.inverse(g_pull_back(point))
+    ricci = np.trace( (-1) * g_pb_inv * partial_g_pb * g_pb_inv * partial_g_pb  
+        + g_pb_inv * double_partial_g_pb)
+    return np.trace(ricci)
+
+def compute_kahler_metric_partial(k, h_balanced, point):
     """STUB"""
-    return 0.
+    s_p = don.eval_sections(don.monomials(k), point) 
+    partial_sp = don.eval_sections(don.monomial_partials(k), point)
+    partial_sp_conj = np.conjugate(partial_sp)
+    
+    return np.ones((3,5,5))
+
+def compute_kahler_metric_double_partial(k, h_balanced, point):
+    """STUB"""
+    return np.ones((3,5,5))
 
 volume_cy = lambda n_t, point_weights : (1 / n_t) * np.sum(point_weights['weight']) # sum weights 
 

@@ -20,7 +20,7 @@ def main(k_max, n_t, output_file):
     plt.savefig(output_file)
 
 def parser_config():
-    parser = argparse.ArgumentParser(description='Approximate the Calabi-Yau metric of the fermat quintic')
+    parser = argparse.ArgumentParser(description='Compute $\sigma_k$ measure for a given k and balanced metric')
     parser.add_argument('-k', type=int, required=True, help='order of fermat quintic sections')
     parser.add_argument('-N', type=int, required=True, help='number of sample points')
     parser.add_argument('-o', '--output', type=str, default='sigma_%s.png' % datetime.datetime.now().isoformat(), 

@@ -175,16 +175,23 @@ def t_operator(k, n_k, h_n, point_weights):
     return t_acc
 
 def pull_back(k, h_balanced, point):
+    jac = jacobian(point)
+    g_k = kahler_metric(k, h_balanced, point)
+    return np.einsum('ai,ij,bj', np.conjugate(jac), g_k, jac)
+
+kahler_pot_partial_0 = lambda h_bal, s_p : np.log(np.einsum('ij,i,j', h_bal, s_p, np.conjugate(s_p)))
+
+kahler_pot_partial_1 = lambda h_bal, partial_sp, s_p : np.einsum('ab,ai,b', h_bal, partial_sp, np.conjugate(s_p))
+
+kahler_pot_partial_2 = lambda h_bal, partial_sp : np.einsum('ab,ai,bj', h_bal, partial_sp, np.conjugate(partial_sp))
+
+def kahler_metric (k, h_bal, point): 
     s_p = eval_sections(monomials(k), point) 
     partial_sp = eval_sections(monomial_partials(k), point)
-    partial_sp_conj = np.conjugate(partial_sp)
-    kahler_pot_partial_0 = np.log(np.einsum('ij,i,j', h_balanced, s_p, np.conjugate(s_p)))
-    kahler_pot_partial_1 = np.einsum('ab,ai,b', h_balanced, partial_sp, np.conjugate(s_p))
-    kahler_pot_partial_2 = np.einsum('ab,ai,bj', h_balanced, partial_sp, partial_sp_conj)
-    g_tilde = ((k * np.pi)**(-1) * (kahler_pot_partial_0 * kahler_pot_partial_2 
-        - (kahler_pot_partial_0 ** 2) * kahler_pot_partial_1 * np.conjugate(kahler_pot_partial_1 )))
-    jac = jacobian(point)
-    return np.einsum('ai,ij,bj', np.conjugate(jac), g_tilde, jac)
+    k_0 = kahler_pot_partial_0 (h_bal, s_p)
+    k_1 = kahler_pot_partial_1 (h_bal, partial_sp, s_p)
+    k_2 = kahler_pot_partial_2 (h_bal, partial_sp)
+    return (k * np.pi) ** (-1) * (k_0 * k_2 - (k_0 ** 2) * k_1 * np.conjugate(k_1))
 
 pull_back_determinant = lambda k, h_balanced, point : np.linalg.det(pull_back(k, h_balanced, point))
 
@@ -201,11 +208,14 @@ def load_balanced_metric(file_name, k):
         .view(np.complex128).reshape(dim, dim))
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Approximate the Calabi-Yau metric of the fermat quintic')
+    parser = argparse.ArgumentParser(description='numerically approximate the Calabi-Yau metric of the fermat quintic')
     parser.add_argument('-k', type=int,required=True, help='order of fermat quintic sections')
     parser.add_argument('-N', type=int,required=True, default=-1, help='number of sample points')
     args = parser.parse_args()
 
-    p, _ = sample_ambient_pair()
-    z = to_affine_patch(p)
-    print('g_%d(p)=%f' % (args.k, pull_back_determinant(args.k, donaldson(args.k), z)))
+    sample_point = sample_quintic()[0]
+    h_bal = donaldson(args.k, max_iterations=12)
+    g_pb = pull_back(args.k, h_bal, sample_point)
+    print(g_pb)
+    print(np.linalg.det(h_bal))
+    print('g_%d(p)=%f' % (args.k , np.linalg.det(g_pb)))
