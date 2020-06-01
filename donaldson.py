@@ -159,9 +159,12 @@ def donaldson(k, max_iterations=10, generator=generate_quintic_point_weights):
 
     volume_cy = (1 / n_p) * np.sum(point_weights['weight']) 
     t_operator_func = lambda h_new : (n_k / (n_p * volume_cy)) * t_operator(k, n_k, h_new, point_weights)
-    return reduce(lambda h_n, _ : np.transpose(np.linalg.inv(t_operator_func(h_n))), 
-        range(1, max_iterations), 
-        initial_balanced_metric(n_k))
+    
+    h_n = initial_balanced_metric(n_k)
+    for _ in range(0, max_iterations):
+        h_m_inv = np.linalg.inv(t_operator_func(h_n))
+        h_n = np.transpose(h_m_inv)
+    return h_n
 
 def t_operator(k, n_k, h_n, point_weights):
     t_acc = np.zeros((n_k, n_k), dtype=np.complex64)
@@ -215,6 +218,7 @@ if __name__ == "__main__":
 
     sample_point = sample_quintic()[0]
     h_bal = donaldson(args.k, max_iterations=12)
+    print(h_bal)
     g_pb = pull_back(args.k, h_bal, sample_point)
     print(np.linalg.det(h_bal))
     print(np.linalg.det(g_pb))
