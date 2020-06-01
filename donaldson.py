@@ -24,7 +24,7 @@ def compose(*functions):
 def weight(point):
     w = find_kahler_form(point)
     z_j = elim_z_j(point)
-    return (5 ** -2) * np.abs(z_j) ** (-8) * np.linalg.det(w) ** (-1)
+    return np.real( (5 ** -2) * (np.abs(z_j) ** (-8)) * (np.linalg.det(w) ** (-1)) )
 
 def find_kahler_form(point):
     jac = np.transpose(jacobian(point))
@@ -79,7 +79,6 @@ def generate_quintic_point_weights(k, n_t=-1):
 
     point_weights = np.zeros((n_p), dtype=point_weight_dtype)
     point_weights['point'], point_weights['weight'] = sample_points, weights
-
     return point_weights
 
 def sample_ambient_pair():
@@ -157,17 +156,15 @@ def donaldson(k, max_iterations=10, generator=generate_quintic_point_weights):
     point_weights = generator(k)
     n_k = basis_size(k)
     n_p = len(point_weights)
-    h_0 = initial_balanced_metric(n_k)
 
-    volume_cy = lambda pw : (1 / n_p) * np.sum(pw['weight']) # sum weights
-    t_operator_func = lambda h_n : (n_k / (n_p * volume_cy(point_weights))) * t_operator(k, n_k, h_n, point_weights)
-
-    h_balanced = reduce(lambda h_n, _ : np.transpose(np.linalg.inv(t_operator_func(h_n))), \
-        range(1, max_iterations), h_0)
-    return h_balanced
+    volume_cy = (1 / n_p) * np.sum(point_weights['weight']) 
+    t_operator_func = lambda h_new : (n_k / (n_p * volume_cy)) * t_operator(k, n_k, h_new, point_weights)
+    return reduce(lambda h_n, _ : np.transpose(np.linalg.inv(t_operator_func(h_n))), 
+        range(1, max_iterations), 
+        initial_balanced_metric(n_k))
 
 def t_operator(k, n_k, h_n, point_weights):
-    t_acc = np.zeros((n_k, n_k), dtype=complex)
+    t_acc = np.zeros((n_k, n_k), dtype=np.complex64)
     for p_w in point_weights:
         s_p = eval_sections(monomials(k), p_w['point']) 
         inner = np.einsum('ij,i,j', h_n, s_p, np.conjugate(s_p))
@@ -177,11 +174,13 @@ def t_operator(k, n_k, h_n, point_weights):
 def pull_back(k, h_balanced, point):
     jac = jacobian(point)
     g_k = kahler_metric(k, h_balanced, point)
-    return np.einsum('ai,ij,bj', np.conjugate(jac), g_k, jac)
+    return np.einsum('ai,ij,bj', jac, g_k, np.conjugate(jac))
 
 kahler_pot_partial_0 = lambda h_bal, s_p : np.log(np.einsum('ij,i,j', h_bal, s_p, np.conjugate(s_p)))
 
 kahler_pot_partial_1 = lambda h_bal, partial_sp, s_p : np.einsum('ab,ai,b', h_bal, partial_sp, np.conjugate(s_p))
+
+kahler_pot_partial_1_bar = lambda h_bal, partial_sp, s_p : np.einsum('ab,a,bi', h_bal, s_p, np.conjugate(partial_sp) )
 
 kahler_pot_partial_2 = lambda h_bal, partial_sp : np.einsum('ab,ai,bj', h_bal, partial_sp, np.conjugate(partial_sp))
 
@@ -190,8 +189,9 @@ def kahler_metric (k, h_bal, point):
     partial_sp = eval_sections(monomial_partials(k), point)
     k_0 = kahler_pot_partial_0 (h_bal, s_p)
     k_1 = kahler_pot_partial_1 (h_bal, partial_sp, s_p)
+    k_1_bar = kahler_pot_partial_1_bar (h_bal, partial_sp, s_p)
     k_2 = kahler_pot_partial_2 (h_bal, partial_sp)
-    return (k * np.pi) ** (-1) * (k_0 * k_2 - (k_0 ** 2) * k_1 * np.conjugate(k_1))
+    return (k * np.pi) ** (-1) * (k_0 * k_2 - (k_0 ** 2) * np.einsum('i,j', k_1, k_1_bar))
 
 pull_back_determinant = lambda k, h_balanced, point : np.linalg.det(pull_back(k, h_balanced, point))
 
@@ -208,14 +208,14 @@ def load_balanced_metric(file_name, k):
         .view(np.complex128).reshape(dim, dim))
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='numerically approximate the Calabi-Yau metric of the fermat quintic')
+    parser = argparse.ArgumentParser(description='Numerically approximate the Calabi-Yau metric of the fermat quintic')
     parser.add_argument('-k', type=int,required=True, help='order of fermat quintic sections')
-    parser.add_argument('-N', type=int,required=True, default=-1, help='number of sample points')
+    parser.add_argument('-N', type=int,required=False, default=-1, help='number of sample points')
     args = parser.parse_args()
 
     sample_point = sample_quintic()[0]
     h_bal = donaldson(args.k, max_iterations=12)
     g_pb = pull_back(args.k, h_bal, sample_point)
-    print(g_pb)
     print(np.linalg.det(h_bal))
+    print(np.linalg.det(g_pb))
     print('g_%d(p)=%f' % (args.k , np.linalg.det(g_pb)))
