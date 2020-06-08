@@ -5,6 +5,7 @@ from functools import *
 from itertools import combinations_with_replacement, islice
 from scipy.special import comb
 import datetime
+import os as os
 
 COORDINATES = 5
 DONALDSON_MAX_ITERATIONS = 10
@@ -161,9 +162,11 @@ def donaldson(k, max_iterations=10, generator=generate_quintic_point_weights):
     t_operator_func = lambda h_new : (n_k / (n_p * volume_cy)) * t_operator(k, n_k, h_new, point_weights)
     
     h_n = initial_balanced_metric(n_k)
-    for _ in range(0, max_iterations):
+    for i in range(0, max_iterations):
         h_m_inv = np.linalg.inv(t_operator_func(h_n))
         h_n = np.transpose(h_m_inv)
+        fname = os.path.join(str(k), str(i))
+        np.save(fname, h_n)
     return h_n
 
 def t_operator(k, n_k, h_n, point_weights):
@@ -215,7 +218,8 @@ if __name__ == "__main__":
     parser.add_argument('-k', type=int,required=True, help='order of fermat quintic sections')
     parser.add_argument('-N', type=int,required=False, default=-1, help='number of sample points')
     args = parser.parse_args()
-
+    if not os.path.exists(str(args.k)):
+        os.makedirs(str(args.k))
     sample_point = sample_quintic()[0]
     h_bal = donaldson(args.k, max_iterations=12)
     print(h_bal)
