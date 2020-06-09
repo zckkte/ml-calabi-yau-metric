@@ -157,15 +157,17 @@ def donaldson(k, max_iterations=10, generator=generate_quintic_point_weights):
     point_weights = generator(k)
     n_k = basis_size(k)
     n_p = len(point_weights)
-
+    np.save(os.path.join(str(k), 'pw'), point_weights)
     volume_cy = (1 / n_p) * np.sum(point_weights['weight']) 
     t_operator_func = lambda h_new : (n_k / (n_p * volume_cy)) * t_operator(k, n_k, h_new, point_weights)
     
     h_n = initial_balanced_metric(n_k)
     for i in range(0, max_iterations):
-        h_m_inv = np.linalg.inv(t_operator_func(h_n))
-        h_n = np.transpose(h_m_inv)
         fname = os.path.join(str(k), str(i))
+        h_m_inv = t_operator_func(h_n)
+        np.save(fname+'b', h_m_inv)
+        h_m_inv = np.linalg.inv(h_m_inv)
+        h_n = np.transpose(h_m_inv)
         np.save(fname, h_n)
     return h_n
 
