@@ -149,7 +149,7 @@ def initial_balanced_metric(n_k):
 
         if is_invertible(h_initial):
             break
-    return h_initial
+    return h_initial / np.linalg.norm(h_initial)
 
 def donaldson(k, max_iterations=10, generator=generate_quintic_point_weights):
     """ Calculates the numerical Calabi-Yau metric on the ambient space $P^4$ """
@@ -163,15 +163,16 @@ def donaldson(k, max_iterations=10, generator=generate_quintic_point_weights):
     h_n = initial_balanced_metric(n_k)
     for _ in range(0, max_iterations):
         h_m_inv = np.linalg.inv(t_operator_func(h_n))
-        h_n = np.transpose(h_m_inv)
+        h_n = h_m_inv.T
     return h_n
 
 def t_operator(k, n_k, h_n, point_weights):
+    #use joblib parallel
     t_acc = np.zeros((n_k, n_k), dtype=np.complex64)
     for p_w in point_weights:
         s_p = eval_sections(monomials(k), p_w['point']) 
         inner = np.einsum('ij,i,j', h_n, s_p, np.conjugate(s_p))
-        t_acc += np.einsum('i,j', s_p, np.conjugate(s_p))  * p_w['weight'] / inner
+        t_acc += np.einsum('i,j', s_p, np.conjugate(s_p))  * p_w['weight'] / np.real(inner)
     return t_acc
 
 def pull_back(k, h_balanced, point):
