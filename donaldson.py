@@ -3,11 +3,13 @@ import numdifftools as nd
 import numpy as np
 from functools import * 
 from itertools import combinations_with_replacement, islice
+from joblib import Parallel, delayed
 from scipy.special import comb
 import datetime
 
 COORDINATES = 5
 DONALDSON_MAX_ITERATIONS = 10
+PROCESSES = -2
 
 point_weight_dtype = np.dtype([
     ('point', np.complex64, COORDINATES), 
@@ -75,7 +77,8 @@ def generate_quintic_point_weights(k, n_t=-1):
     n_k = basis_size(k)
     n_p =  10 * n_k ** 2 + 50000 if n_t < 0 else n_t
     sample_points = sample_quintic_points(n_p)
-    weights = np.vectorize(weight, signature="(m)->()")(sample_points)
+    weights = Parallel(n_jobs=PROCESSES, prefer="processes")(delayed(weight)(p) 
+            for p in sample_points)
 
     point_weights = np.zeros((n_p), dtype=point_weight_dtype)
     point_weights['point'], point_weights['weight'] = sample_points, weights
@@ -102,8 +105,9 @@ def sample_quintic():
     return [ to_affine_patch(p + q * t) for t in roots ]
 
 def sample_quintic_points(n_p):
-    return np.concatenate(reduce(lambda acc, _ : acc + [sample_quintic()], 
-        range(int(n_p / COORDINATES)), []))
+    with Parallel(n_jobs=PROCESSES) as parallel:
+        return np.concatenate(parallel(delayed(sample_quintic)() 
+            for _ in range(int(n_p / COORDINATES))))
 
 def monomials(k):
     """ 
@@ -119,7 +123,8 @@ def monomials(k):
             select_indices=list(select_indices)) 
 
 def eval_sections(sections, point):
-    return np.array(list(map(lambda monomial : np.squeeze(monomial(point)), sections)))
+    with Parallel(n_jobs=PROCESSES) as parallel:
+        return np.array(parallel(delayed(lambda monomial : np.squeeze(monomial(point)))(s) for s in sections))
 
 def monomial_partials(k):
     for section in monomials(k):
@@ -167,13 +172,17 @@ def donaldson(k, max_iterations=10, generator=generate_quintic_point_weights):
     return h_n
 
 def t_operator(k, n_k, h_n, point_weights):
-    #use joblib parallel
-    t_acc = np.zeros((n_k, n_k), dtype=np.complex64)
-    for p_w in point_weights:
-        s_p = eval_sections(monomials(k), p_w['point']) 
-        inner = np.einsum('ij,i,j', h_n, s_p, np.conjugate(s_p))
-        t_acc += np.einsum('i,j', s_p, np.conjugate(s_p))  * p_w['weight'] / np.real(inner)
-    return t_acc
+    with Parallel(n_jobs=PROCESSES, prefer='processes') as parallel:
+        t_acc = np.zeros((n_k, n_k), dtype=np.complex64)
+        res = parallel(delayed(t_operator_integrand) (k, h_n, point_weight) 
+            for point_weight in point_weights)
+        t_acc += sum(res)
+        return t_acc
+
+def t_operator_integrand(k, h_n, point_weight):
+    s_p = eval_sections(monomials(k), point_weight['point']) 
+    inner = np.einsum('ij,i,j', h_n, s_p, np.conjugate(s_p))
+    return np.einsum('i,j', s_p, np.conjugate(s_p))  * point_weight['weight'] / np.real(inner)
 
 def pull_back(k, h_balanced, point):
     jac = jacobian(point)
@@ -219,8 +228,6 @@ if __name__ == "__main__":
 
     sample_point = sample_quintic()[0]
     h_bal = donaldson(args.k, max_iterations=12)
-    print(h_bal)
     g_pb = pull_back(args.k, h_bal, sample_point)
     print(np.linalg.det(h_bal))
-    print(np.linalg.det(g_pb))
     print('g_%d(p)=%f' % (args.k , np.linalg.det(g_pb)))
