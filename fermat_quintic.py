@@ -120,6 +120,9 @@ def monomials(k):
             select_indices=list(select_indices)) 
 
 def eval_sections(sections, point):
+    return np.array(list(map(lambda monomial : np.squeeze(monomial(point)), sections)))
+
+def eval_sections_parallel(sections, point):
     with Parallel(n_jobs) as parallel:
         return np.array(parallel(delayed(lambda monomial : np.squeeze(monomial(point)))(s) for s in sections))
 
