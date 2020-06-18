@@ -1,21 +1,26 @@
 import donaldson as don
+import fermat_quintic as fq
 import numpy as np
 import numdifftools as nd
+from joblib import Parallel, delayed
 from functools import * 
 
-def sigma(k, n_t, g_pull_back, generator=don.generate_quintic_point_weights):
+def sigma(k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
     point_weights = generator(k, n_t)
+    g_pull_back = lambda p : fq.pull_back(k, h_balanced, p)
     vol_cy = volume_cy(n_t, point_weights)
     vol_k = volume_k(n_t, point_weights, g_pull_back)
-
-    return (n_t * vol_cy) ** (-1) * reduce(lambda acc, pw : 
-        acc + np.abs(1 - quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
+        
+    sigma_integrand = np.vectorize(lambda pw : np.abs(1 - quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
             * vol_cy / (omega_wedge_omega_conj(pw['point']) * vol_k ) * pw['weight']), 
-        point_weights, 0)
+                signature='()->()')
+    with Parallel(n_jobs=-1, prefer='processes') as parallel:
+        t_acc_part = parallel(delayed(sigma_integrand) (point_weight) for point_weight in point_weights)
+        return (n_t * vol_cy) ** (-1) * sum(t_acc_part)
 
-def global_ricci_scalar (k, n_t, h_balanced, generator=don.generate_quintic_point_weights):
+def global_ricci_scalar (k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
     point_weights = generator(k, n_t)
-    g_pull_back = lambda p : don.pull_back(k, h_balanced, p)
+    g_pull_back = lambda p : fq.pull_back(k, h_balanced, p)
     vol_cy = volume_cy(n_t, point_weights)
     vol_k_3 = volume_k(n_t, point_weights, g_pull_back) ** (1/3)
 
@@ -25,12 +30,12 @@ def global_ricci_scalar (k, n_t, h_balanced, generator=don.generate_quintic_poin
         point_weights, 0.)
 
 def ricci_scalar_k(k, h_balanced, g_pull_back, point):
-    g_kahler = don.kahler_metric(k, h_balanced, point)
+    g_kahler = fq.kahler_metric(k, h_balanced, point)
     partial_g_k = compute_kahler_metric_partial(k, h_balanced, point)
     double_partial_g_k = compute_kahler_metric_double_partial(k, h_balanced, point)
-    jac = np.transpose(don.jacobian(point))
+    jac = np.transpose(fq.jacobian(point))
     jac_bar = np.conj(jac)
-    partial_jac = nd.Gradient(lambda x : don.jacobian(x))(point)
+    partial_jac = nd.Gradient(lambda x : fq.jacobian(x))(point)
     partial_jac_conj = np.conj(partial_jac)
 
     partial_g_pb = (np.einsum('kai,ij,bj->kab', partial_jac, g_kahler, jac_bar)
@@ -47,8 +52,8 @@ def ricci_scalar_k(k, h_balanced, g_pull_back, point):
 
 def compute_kahler_metric_partial(k, h_balanced, point):
     """STUB"""
-    s_p = don.eval_sections(don.monomials(k), point) 
-    partial_sp = don.eval_sections(don.monomial_partials(k), point)
+    s_p = fq.eval_sections(fq.monomials(k), point) 
+    partial_sp = fq.eval_with(lambda s: nd.Jacobian(s)(point), fq.monomials(k)) 
     partial_sp_conj = np.conjugate(partial_sp)
     
     return np.ones((3,5,5))
@@ -70,4 +75,4 @@ def vol_k_integrand(point_weight, g_pull_back):
 
 quintic_kahler_form_determinant = lambda g : np.linalg.det(g) #prefactors?
 
-omega_wedge_omega_conj = lambda point : 5 ** (-2) * np.abs(don.elim_z_j(point)) ** (-8)
+omega_wedge_omega_conj = lambda point : 5 ** (-2) * np.abs(fq.elim_z_j(point)) ** (-8)

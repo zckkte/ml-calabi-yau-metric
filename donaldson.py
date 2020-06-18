@@ -49,7 +49,7 @@ def donaldson(k, max_iterations=10, generator=fermat_quintic.generate_quintic_po
         initial_balanced_metric(n_k))
 
 def t_operator(k, n_k, h_n, point_weights):
-    with Parallel(n_jobs=PROCESSES, verbose=True, prefer='processes') as parallel:
+    with Parallel(n_jobs=PROCESSES, prefer='processes') as parallel:
         t_acc = np.zeros((n_k, n_k), dtype=np.complex64)
         res = parallel(delayed(t_operator_integrand) (k, h_n, point_weight) 
             for point_weight in point_weights)

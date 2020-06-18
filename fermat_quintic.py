@@ -119,23 +119,18 @@ def monomials(k):
         yield partial(lambda z, select_indices : np.prod(np.take(z, select_indices)), 
             select_indices=list(select_indices)) 
 
+def eval_with(func, sections):
+    return np.array([ np.squeeze(func(s)) for s in sections])
+
 def eval_sections(sections, point):
     return np.array(list(map(lambda monomial : np.squeeze(monomial(point)), sections)))
-
-def eval_sections_parallel(sections, point):
-    with Parallel(n_jobs) as parallel:
-        return np.array(parallel(delayed(lambda monomial : np.squeeze(monomial(point)))(s) for s in sections))
-
-def monomial_partials(k):
-    for section in monomials(k):
-        yield nd.Jacobian(lambda p : section(p))
 
 def pull_back(k, h_balanced, point):
     jac = jacobian(point)
     g_k = kahler_metric(k, h_balanced, point)
     return np.einsum('ai,ij,bj', jac, g_k, np.conjugate(jac))
 
-kahler_pot_partial_0 = lambda h_bal, s_p : np.log(np.einsum('ij,i,j', h_bal, s_p, np.conjugate(s_p)))
+kahler_pot_0 = lambda h_bal, s_p : np.einsum('ij,i,j', h_bal, s_p, np.conjugate(s_p)) ** (-1)
 
 kahler_pot_partial_1 = lambda h_bal, partial_sp, s_p : np.einsum('ab,ai,b', h_bal, partial_sp, np.conjugate(s_p))
 
@@ -144,9 +139,9 @@ kahler_pot_partial_1_bar = lambda h_bal, partial_sp, s_p : np.einsum('ab,a,bi', 
 kahler_pot_partial_2 = lambda h_bal, partial_sp : np.einsum('ab,ai,bj', h_bal, partial_sp, np.conjugate(partial_sp))
 
 def kahler_metric (k, h_bal, point): 
-    s_p = eval_sections(monomials(k), point) 
-    partial_sp = eval_sections(monomial_partials(k), point)
-    k_0 = kahler_pot_partial_0 (h_bal, s_p)
+    s_p = eval_with(lambda s : s(point), monomials(k)) 
+    partial_sp = eval_with(lambda s: nd.Jacobian(s)(point), monomials(k)) 
+    k_0 = kahler_pot_0 (h_bal, s_p)
     k_1 = kahler_pot_partial_1 (h_bal, partial_sp, s_p)
     k_1_bar = kahler_pot_partial_1_bar (h_bal, partial_sp, s_p)
     k_2 = kahler_pot_partial_2 (h_bal, partial_sp)
