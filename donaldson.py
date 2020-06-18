@@ -5,7 +5,11 @@ from functools import *
 from itertools import combinations_with_replacement, islice
 from scipy.special import comb
 import datetime
+import time
+#from joblib import Parallel, delayed
+import multiprocessing as mp
 
+n_proc = mp.cpu_count()
 COORDINATES = 5
 DONALDSON_MAX_ITERATIONS = 10
 
@@ -75,7 +79,13 @@ def generate_quintic_point_weights(k, n_t=-1):
     n_k = basis_size(k)
     n_p =  10 * n_k ** 2 + 50000 if n_t < 0 else n_t
     sample_points = sample_quintic_points(n_p)
-    weights = np.vectorize(weight, signature="(m)->()")(sample_points)
+    # afaik vectorize doesn't significantly improve performance
+    # I'm just gonna throw some more cores at it
+    with mp.Pool(processes=n_proc) as pool:
+        weight_func = [pool.apply_async(weight, (p,)) for p in sample_points]
+        weights = [res.get() for res in weight_func]
+    weights = np.array(weights)
+    #weights = np.vectorize(weight, signature="(m)->()")(sample_points)
 
     point_weights = np.zeros((n_p), dtype=point_weight_dtype)
     point_weights['point'], point_weights['weight'] = sample_points, weights
@@ -158,20 +168,34 @@ def donaldson(k, max_iterations=10, generator=generate_quintic_point_weights):
     n_p = len(point_weights)
 
     volume_cy = (1 / n_p) * np.sum(point_weights['weight']) 
-    t_operator_func = lambda h_new : (n_k / (n_p * volume_cy)) * t_operator(k, n_k, h_new, point_weights)
+    # use more cores
+    #t_operator_func = lambda h_new : (n_k / (n_p * volume_cy)) * t_operator(k, n_k, h_new, point_weights)
     
     h_n = initial_balanced_metric(n_k)
     for _ in range(0, max_iterations):
-        h_m_inv = np.linalg.inv(t_operator_func(h_n))
+        with mp.Pool(processes=n_proc) as pool:
+            top_func = [pool.apply_async(t_operator_single, (k, h_n, p)) for p in point_weights]
+            top_data = [res.get() for res in top_func]
+        top_data = np.add.reduce(top_data, axis=0)
+        h_m_inv = np.linalg.inv((n_k / (n_p * volume_cy)) * top_data)
         h_n = np.transpose(h_m_inv)
     return h_n
 
 def t_operator(k, n_k, h_n, point_weights):
+    # not sure what the k is used for?
     t_acc = np.zeros((n_k, n_k), dtype=np.complex64)
     for p_w in point_weights:
         s_p = eval_sections(monomials(k), p_w['point']) 
         inner = np.einsum('ij,i,j', h_n, s_p, np.conjugate(s_p))
         t_acc += np.einsum('i,j', s_p, np.conjugate(s_p))  * p_w['weight'] / inner
+    return t_acc
+
+def t_operator_single(k, h_n, point_weight):
+    # not sure what the k is used for?
+    # gonna throw more cores at it.
+    s_p = eval_sections(monomials(k), point_weight['point']) 
+    inner = np.einsum('ij,i,j', h_n, s_p, np.conjugate(s_p))
+    t_acc = np.einsum('i,j', s_p, np.conjugate(s_p))  * point_weight['weight'] / inner
     return t_acc
 
 def pull_back(k, h_balanced, point):
@@ -217,7 +241,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     sample_point = sample_quintic()[0]
+    start = time.time()
     h_bal = donaldson(args.k, max_iterations=12)
+    end = time.time()
+    print(end-start)
     print(h_bal)
     g_pb = pull_back(args.k, h_bal, sample_point)
     print(np.linalg.det(h_bal))
