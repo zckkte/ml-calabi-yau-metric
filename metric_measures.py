@@ -12,7 +12,7 @@ def sigma(k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
     vol_k = volume_k(n_t, point_weights, g_pull_back)
         
     sigma_integrand = np.vectorize(lambda pw : np.abs(1 - quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
-            * vol_cy / (omega_wedge_omega_conj(pw['point']) * vol_k ) * pw['weight']), 
+            * vol_cy / (omega_wedge_omega_conj(pw['point']) * vol_k )) * pw['weight'], 
                 signature='()->()')
     with Parallel(n_jobs=-1, prefer='processes') as parallel:
         t_acc_part = parallel(delayed(sigma_integrand) (point_weight) for point_weight in point_weights)
