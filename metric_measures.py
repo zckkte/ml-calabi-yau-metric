@@ -50,16 +50,24 @@ def ricci_scalar_k(k, h_balanced, g_pull_back, point):
         + g_pb_inv * double_partial_g_pb)
     return np.trace(ricci)
 
-def compute_kahler_metric_partial(k, h_balanced, point):
-    """STUB"""
+def compute_kahler_metric_partial(k, h_bal, point):
+    """(B.78) Ashmore"""
     s_p = fq.eval_sections(fq.monomials(k), point) 
     partial_sp = fq.eval_with(lambda s: nd.Jacobian(s)(point), fq.monomials(k)) 
+    double_partial_sp = fq.eval_with(lambda s: nd.Hessian(s)(point), fq.monomials(k)) 
     partial_sp_conj = np.conjugate(partial_sp)
-    
-    return np.ones((3,5,5))
+    k_0 = fq.kahler_pot_0(h_bal, s_p)
+    k_1_bar = fq.kahler_pot_partial_1_bar(h_bal,partial_sp, s_p)
+    k_1 = fq.kahler_pot_partial_1(h_bal,partial_sp, s_p)
+    k_2 = np.einsum('ab,aij,b', h_bal, double_partial_sp , np.conjugate(s_p))
+    k_3 = np.einsum('ab,aij,bk', h_bal, double_partial_sp , np.conjugate(partial_sp))
+
+    return (k * np.pi) ** (-1) * ( (-1) * ( k_0 ** 2 ) * 
+            (np.einsum('i,kl', k_1, k_2) + np.einsum('k,il', k_1, k_2) + np.einsum('l,ik', k_1_bar, k_2) ) 
+                + k_0 * k_3 + 2 * k_0 ** (3) * np.einsum('i,k,l', k_1, k_1, k_1_bar) )
 
 def compute_kahler_metric_double_partial(k, h_balanced, point):
-    """STUB"""
+    """(B.81) Ashmore"""
     return np.ones((3,5,5))
 
 volume_cy = lambda n_t, point_weights : (1 / n_t) * np.sum(point_weights['weight']) # sum weights 
