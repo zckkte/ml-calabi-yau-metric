@@ -15,19 +15,21 @@ def sigma(k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
             * vol_cy / (omega_wedge_omega_conj(pw['point']) * vol_k )) * pw['weight'], 
                 signature='()->()')
     with Parallel(n_jobs=-1, prefer='processes') as parallel:
-        t_acc_part = parallel(delayed(sigma_integrand) (point_weight) for point_weight in point_weights)
-        return (n_t * vol_cy) ** (-1) * sum(t_acc_part)
+        sigma_acc_part = parallel(delayed(sigma_integrand) (point_weight) for point_weight in point_weights)
+        return (n_t * vol_cy) ** (-1) * sum(sigma_acc_part)
 
 def global_ricci_scalar (k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
     point_weights = generator(k, n_t)
     g_pull_back = lambda p : fq.pull_back(k, h_balanced, p)
     vol_cy = volume_cy(n_t, point_weights)
     vol_k_3 = volume_k(n_t, point_weights, g_pull_back) ** (1/3)
-
-    return (vol_k_3 / (n_t * vol_cy)) * reduce(lambda acc, pw :
-        acc + quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
+            
+    ricci_integrand = np.vectorize(lambda pw : quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
             / omega_wedge_omega_conj(pw['point']) * ricci_scalar_k(k, h_balanced, g_pull_back, pw['point']) * pw['weight'], 
-        point_weights, 0.)
+                signature='()->()')
+    with Parallel(n_jobs=-1, prefer='processes') as parallel:
+        ricci_int_acc_part = parallel(delayed(ricci_integrand) (point_weight) for point_weight in point_weights)
+        return (vol_k_3 / (n_t * vol_cy)) * sum(ricci_int_acc_part)
 
 def ricci_scalar_k(k, h_balanced, g_pull_back, point):
     g_kahler = fq.kahler_metric(k, h_balanced, point)
@@ -38,37 +40,54 @@ def ricci_scalar_k(k, h_balanced, g_pull_back, point):
     partial_jac = nd.Gradient(lambda x : fq.jacobian(x))(point)
     partial_jac_conj = np.conj(partial_jac)
 
-    partial_g_pb = (np.einsum('kai,ij,bj->kab', partial_jac, g_kahler, jac_bar)
-        + np.einsum('ai,kij,bj->kab', jac, partial_g_k, jac_bar))
-    double_partial_g_pb = (np.einsum('kai,ij,hbj', partial_jac, g_kahler, partial_jac_conj) 
-        + np.einsum('mai,mij,bj', partial_jac, partial_g_k, jac_bar) 
-        + np.einsum('ai,ijnm,bj', jac, double_partial_g_k, jac_bar) 
-        + np.einsum('ai,nij,mbj', jac, partial_g_k, partial_jac_conj))
+    partial_g_pb =  (np.einsum('aki,ij,jb', partial_jac, g_kahler, jac_bar)
+        + np.einsum('ia,kij,jb', jac, partial_g_k, jac_bar))
+    double_partial_g_pb = (np.einsum('ami,nij,jb', partial_jac, partial_g_k, jac_bar) 
+        + np.einsum('ia,ijnm,jb', jac, double_partial_g_k, jac_bar) 
+        + np.einsum('kai,ij,hbj->khab', partial_jac, g_kahler, partial_jac_conj) 
+        + np.einsum('ia,nij,bmj', jac, partial_g_k, partial_jac_conj))
 
-    g_pb_inv = np.inverse(g_pull_back(point))
-    ricci = np.trace( (-1) * g_pb_inv * partial_g_pb * g_pb_inv * partial_g_pb  
-        + g_pb_inv * double_partial_g_pb)
-    return np.trace(ricci)
+    g_pb_inv = np.linalg.inv(g_pull_back(point))
+    ricci = (k * np.pi) ** (-1) * np.trace((-1) * np.einsum('ab,bci,cd,dej', g_pb_inv, partial_g_pb, g_pb_inv, partial_g_pb) 
+        + np.einsum('ab,bcij', g_pb_inv, double_partial_g_pb))
+    return np.trace(np.einsum('ia,jb,ij', jac, jac_bar, ricci))
 
-def compute_kahler_metric_partial(k, h_bal, point):
-    """(B.78) Ashmore"""
+def kahler_pot_partials (k, h_bal, point) : 
     s_p = fq.eval_sections(fq.monomials(k), point) 
     partial_sp = fq.eval_with(lambda s: nd.Jacobian(s)(point), fq.monomials(k)) 
     double_partial_sp = fq.eval_with(lambda s: nd.Hessian(s)(point), fq.monomials(k)) 
-    partial_sp_conj = np.conjugate(partial_sp)
     k_0 = fq.kahler_pot_0(h_bal, s_p)
-    k_1_bar = fq.kahler_pot_partial_1_bar(h_bal,partial_sp, s_p)
-    k_1 = fq.kahler_pot_partial_1(h_bal,partial_sp, s_p)
-    k_2 = np.einsum('ab,aij,b', h_bal, double_partial_sp , np.conjugate(s_p))
-    k_3 = np.einsum('ab,aij,bk', h_bal, double_partial_sp , np.conjugate(partial_sp))
+    k_1 = fq.kahler_pot_partial_1(h_bal, partial_sp, s_p)
+    k_2 = np.einsum('ab,aij,b', h_bal, double_partial_sp, np.conj(s_p))
+    k_3 = np.einsum('ab,aij,bk', h_bal, double_partial_sp, np.conj(partial_sp))
+    k_4 = np.einsum('ab,ika,jlb', h_bal, double_partial_sp, np.conj(double_partial_sp))
+    return [ k_0, k_1, k_2, k_3, k_4 ]
 
-    return (k * np.pi) ** (-1) * ( (-1) * ( k_0 ** 2 ) * 
-            (np.einsum('i,kl', k_1, k_2) + np.einsum('k,il', k_1, k_2) + np.einsum('l,ik', k_1_bar, k_2) ) 
-                + k_0 * k_3 + 2 * k_0 ** (3) * np.einsum('i,k,l', k_1, k_1, k_1_bar) )
+def compute_kahler_metric_partial(k, h_bal, point):
+    """(B.78) Ashmore"""
+    k_pot = kahler_pot_partials(k, h_bal, point)
+    return ( (-1) * ( k_pot[0] ** 2 ) * 
+            (np.einsum('i,kl', k_pot[1], k_pot[2]) + np.einsum('k,il->ikl', k_pot[1], k_pot[2]) 
+                + np.einsum('l,ik->ikl', np.conj(k_pot[1]), k_pot[2]) ) 
+            + k_pot[0] * k_pot[3] + 2 * k_pot[0] ** 3 * np.einsum('i,k,l->ikl', k_pot[1], k_pot[1], np.conj(k_pot[1])) )
 
-def compute_kahler_metric_double_partial(k, h_balanced, point):
+def compute_kahler_metric_double_partial(k, h_bal, point):
     """(B.81) Ashmore"""
-    return np.ones((3,5,5))
+    k_pot = kahler_pot_partials(k, h_bal, point)
+    return (k_pot[0] * k_pot[4] 
+        - (k_pot[0] ** 2) * (np.einsum('ij,kl', k_pot[2], k_pot[2]) 
+            + np.einsum('ij,kl', k_pot[2], np.conj(k_pot[2])) + np.einsum('ij,kl', k_pot[2], k_pot[2]) )
+        - (k_pot[0] ** 2) * (np.einsum('j, ikl', np.conj(k_pot[1]), k_pot[3]) 
+            + np.einsum('j, ikl', np.conj(k_pot[1]), k_pot[3]) 
+            + np.einsum('j, ikl', k_pot[1], np.conj(k_pot[3]) )
+            + np.einsum('j, ikl', k_pot[1], np.conj(k_pot[3]) ))
+        + 2 * k_pot[0] ** 3 * (np.einsum('i,j,kl', k_pot[1], np.conj(k_pot[1]), k_pot[2]) 
+            + np.einsum('ij,k,l', k_pot[2], k_pot[1], np.conj(k_pot[1]) ) 
+            + np.einsum('j,k,il', np.conj(k_pot[1]), k_pot[1], k_pot[2]) 
+            + np.einsum('i,kj,l', k_pot[1], k_pot[2], np.conj(k_pot[1])) 
+            + np.einsum('i,k,jl', k_pot[1], k_pot[1], np.conj(k_pot[2]) )
+            + np.einsum('j,ik,l', np.conj(k_pot[1]), k_pot[2], np.conj(k_pot[1])) )
+        - 6 * k_pot[0] ** 4 * np.einsum('i,j,k,l', k_pot[1], np.conj(k_pot[1]), k_pot[1],np.conj(k_pot[1])) )
 
 volume_cy = lambda n_t, point_weights : (1 / n_t) * np.sum(point_weights['weight']) # sum weights 
 
