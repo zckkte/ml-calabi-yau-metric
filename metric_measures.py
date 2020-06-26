@@ -33,8 +33,9 @@ def global_ricci_scalar (k, n_t, h_balanced, generator=fq.generate_quintic_point
 
 def ricci_scalar_k(k, h_balanced, g_pull_back, point):
     g_kahler = fq.kahler_metric(k, h_balanced, point)
-    partial_g_k = compute_kahler_metric_partial(k, h_balanced, point)
-    double_partial_g_k = compute_kahler_metric_double_partial(k, h_balanced, point)
+    k_pot = kahler_pot_partials(k, h_balanced, point)
+    partial_g_k = compute_kahler_metric_partial(k, h_balanced, k_pot, point)
+    double_partial_g_k = compute_kahler_metric_double_partial(k, h_balanced, k_pot, point)
     jac = np.transpose(fq.jacobian(point))
     jac_bar = np.conj(jac)
     partial_jac = nd.Gradient(lambda x : fq.jacobian(x))(point)
@@ -60,34 +61,32 @@ def kahler_pot_partials (k, h_bal, point) :
     k_1 = fq.kahler_pot_partial_1(h_bal, partial_sp, s_p)
     k_2 = np.einsum('ab,aij,b', h_bal, double_partial_sp, np.conj(s_p))
     k_3 = np.einsum('ab,aij,bk', h_bal, double_partial_sp, np.conj(partial_sp))
-    k_4 = np.einsum('ab,ika,jlb', h_bal, double_partial_sp, np.conj(double_partial_sp))
+    k_4 = np.einsum('ab,aik,bjl', h_bal, double_partial_sp, np.conj(double_partial_sp))
     return [ k_0, k_1, k_2, k_3, k_4 ]
 
-def compute_kahler_metric_partial(k, h_bal, point):
+def compute_kahler_metric_partial(k, h_bal, k_pot, point):
     """(B.78) Ashmore"""
-    k_pot = kahler_pot_partials(k, h_bal, point)
-    return ( (-1) * ( k_pot[0] ** 2 ) * 
+    return ((-1) * ( k_pot[0] ** 2 ) * 
             (np.einsum('i,kl', k_pot[1], k_pot[2]) + np.einsum('k,il->ikl', k_pot[1], k_pot[2]) 
                 + np.einsum('l,ik->ikl', np.conj(k_pot[1]), k_pot[2]) ) 
-            + k_pot[0] * k_pot[3] + 2 * k_pot[0] ** 3 * np.einsum('i,k,l->ikl', k_pot[1], k_pot[1], np.conj(k_pot[1])) )
+            + k_pot[0] * k_pot[3] + 2 * k_pot[0] ** 3 * np.einsum('i,k,l->ikl', k_pot[1], k_pot[1], np.conj(k_pot[1])))
 
-def compute_kahler_metric_double_partial(k, h_bal, point):
+def compute_kahler_metric_double_partial(k, h_bal, k_pot, point):
     """(B.81) Ashmore"""
-    k_pot = kahler_pot_partials(k, h_bal, point)
     return (k_pot[0] * k_pot[4] 
         - (k_pot[0] ** 2) * (np.einsum('ij,kl', k_pot[2], k_pot[2]) 
-            + np.einsum('ij,kl', k_pot[2], np.conj(k_pot[2])) + np.einsum('ij,kl', k_pot[2], k_pot[2]) )
+            + np.einsum('ij,kl', k_pot[2], np.conj(k_pot[2])) + np.einsum('ij,kl', k_pot[2], k_pot[2]))
         - (k_pot[0] ** 2) * (np.einsum('j, ikl', np.conj(k_pot[1]), k_pot[3]) 
             + np.einsum('j, ikl', np.conj(k_pot[1]), k_pot[3]) 
-            + np.einsum('j, ikl', k_pot[1], np.conj(k_pot[3]) )
-            + np.einsum('j, ikl', k_pot[1], np.conj(k_pot[3]) ))
+            + np.einsum('j, ikl', k_pot[1], np.conj(k_pot[3]))
+            + np.einsum('j, ikl', k_pot[1], np.conj(k_pot[3])))
         + 2 * k_pot[0] ** 3 * (np.einsum('i,j,kl', k_pot[1], np.conj(k_pot[1]), k_pot[2]) 
-            + np.einsum('ij,k,l', k_pot[2], k_pot[1], np.conj(k_pot[1]) ) 
+            + np.einsum('ij,k,l', k_pot[2], k_pot[1], np.conj(k_pot[1])) 
             + np.einsum('j,k,il', np.conj(k_pot[1]), k_pot[1], k_pot[2]) 
             + np.einsum('i,kj,l', k_pot[1], k_pot[2], np.conj(k_pot[1])) 
-            + np.einsum('i,k,jl', k_pot[1], k_pot[1], np.conj(k_pot[2]) )
-            + np.einsum('j,ik,l', np.conj(k_pot[1]), k_pot[2], np.conj(k_pot[1])) )
-        - 6 * k_pot[0] ** 4 * np.einsum('i,j,k,l', k_pot[1], np.conj(k_pot[1]), k_pot[1],np.conj(k_pot[1])) )
+            + np.einsum('i,k,jl', k_pot[1], k_pot[1], np.conj(k_pot[2]))
+            + np.einsum('j,ik,l', np.conj(k_pot[1]), k_pot[2], np.conj(k_pot[1])))
+        - 6 * k_pot[0] ** 4 * np.einsum('i,j,k,l', k_pot[1], np.conj(k_pot[1]), k_pot[1],np.conj(k_pot[1])))
 
 volume_cy = lambda n_t, point_weights : (1 / n_t) * np.sum(point_weights['weight']) # sum weights 
 
