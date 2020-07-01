@@ -25,7 +25,7 @@ def global_ricci_scalar (k, n_t, h_balanced, generator=fq.generate_quintic_point
     vol_k_3 = volume_k(n_t, point_weights, g_pull_back) ** (1/3)
             
     ricci_integrand = np.vectorize(lambda pw : quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
-            / omega_wedge_omega_conj(pw['point']) * ricci_scalar_k(k, h_balanced, g_pull_back, pw['point']) * pw['weight'], 
+            / omega_wedge_omega_conj(pw['point']) * np.abs(ricci_scalar_k(k, h_balanced, g_pull_back, pw['point'])) * pw['weight'], 
                 signature='()->()')
     with Parallel(n_jobs=-1, prefer='processes') as parallel:
         ricci_int_acc_part = parallel(delayed(ricci_integrand) (point_weight) for point_weight in point_weights)
@@ -57,7 +57,7 @@ def kahler_pot_partials (k, h_bal, point) :
     s_p = fq.eval_sections(fq.monomials(k), point) 
     partial_sp = fq.eval_with(lambda s: nd.Jacobian(s)(point), fq.monomials(k)) 
     double_partial_sp = fq.eval_with(lambda s: nd.Hessian(s)(point), fq.monomials(k)) 
-    k_0 = fq.kahler_pot_0(h_bal, s_p)
+    k_0 = np.real(fq.kahler_pot_0(h_bal, s_p))
     k_1 = fq.kahler_pot_partial_1(h_bal, partial_sp, s_p)
     k_2 = np.einsum('ab,aij,b', h_bal, double_partial_sp, np.conj(s_p))
     k_3 = np.einsum('ab,aij,bk', h_bal, double_partial_sp, np.conj(partial_sp))
