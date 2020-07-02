@@ -66,6 +66,14 @@ def to_affine_patch(point):
     max_norm_coord = lambda p : p[np.argmax(np.absolute(p))]
     return point / max_norm_coord(point)
 
+def quintic_point_weights(n_p):
+    sample_points = sample_quintic_points(n_p)
+    weights = Parallel(n_jobs, prefer="processes")(delayed(weight)(p) 
+            for p in sample_points)
+    point_weights = np.zeros((n_p), dtype=point_weight_dtype)
+    point_weights['point'], point_weights['weight'] = sample_points, weights
+    return point_weights
+
 def generate_quintic_point_weights(k, n_t=-1):
     """ 
     Generates a structured array of points (on fermat quintic in affine coordinates)
@@ -73,13 +81,7 @@ def generate_quintic_point_weights(k, n_t=-1):
     """
     n_k = basis_size(k)
     n_p =  10 * n_k ** 2 + 50000 if n_t < 0 else n_t
-    sample_points = sample_quintic_points(n_p)
-    weights = Parallel(n_jobs, prefer="processes")(delayed(weight)(p) 
-            for p in sample_points)
-
-    point_weights = np.zeros((n_p), dtype=point_weight_dtype)
-    point_weights['point'], point_weights['weight'] = sample_points, weights
-    return point_weights
+    return quintic_point_weights(n_p)
 
 def sample_ambient_pair():
     """two distinct random points in ambient $P^4$ space"""

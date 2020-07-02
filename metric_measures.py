@@ -5,12 +5,11 @@ import numdifftools as nd
 from joblib import Parallel, delayed
 from functools import * 
 
-def sigma(k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
-    point_weights = generator(k, n_t)
-    g_pull_back = lambda p : fq.pull_back(k, h_balanced, p)
-    vol_cy = volume_cy(n_t, point_weights)
-    vol_k = volume_k(n_t, point_weights, g_pull_back)
-        
+def sigma_error(g_pull_back, point_weights):
+    vol_cy = volume_cy(point_weights)
+    vol_k = volume_k(point_weights, g_pull_back)
+    n_t = len(point_weights)
+
     sigma_integrand = np.vectorize(lambda pw : np.abs(1 - quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
             * vol_cy / (omega_wedge_omega_conj(pw['point']) * vol_k )) * pw['weight'], 
                 signature='()->()')
@@ -18,11 +17,15 @@ def sigma(k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
         sigma_acc_part = parallel(delayed(sigma_integrand) (point_weight) for point_weight in point_weights)
         return (n_t * vol_cy) ** (-1) * sum(sigma_acc_part)
 
+def sigma(k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
+    return sigma_error(g_pull_back=lambda p : fq.pull_back(k, h_balanced, p), 
+        point_weights=generator(k, n_t))
+
 def global_ricci_scalar (k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
     point_weights = generator(k, n_t)
     g_pull_back = lambda p : fq.pull_back(k, h_balanced, p)
-    vol_cy = volume_cy(n_t, point_weights)
-    vol_k_3 = volume_k(n_t, point_weights, g_pull_back) ** (1/3)
+    vol_cy = volume_cy(point_weights)
+    vol_k_3 = volume_k(point_weights, g_pull_back) ** (1/3)
             
     ricci_integrand = np.vectorize(lambda pw : quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
             / omega_wedge_omega_conj(pw['point']) * np.abs(ricci_scalar_k(k, h_balanced, g_pull_back, pw['point'])) * pw['weight'], 
@@ -88,10 +91,10 @@ def compute_kahler_metric_double_partial(k, h_bal, k_pot, point):
             + np.einsum('j,ik,l', np.conj(k_pot[1]), k_pot[2], np.conj(k_pot[1])))
         - 6 * k_pot[0] ** 4 * np.einsum('i,j,k,l', k_pot[1], np.conj(k_pot[1]), k_pot[1],np.conj(k_pot[1])))
 
-volume_cy = lambda n_t, point_weights : (1 / n_t) * np.sum(point_weights['weight']) # sum weights 
+volume_cy = lambda point_weights : (1 / len(point_weights)) * np.sum(point_weights['weight']) 
 
-volume_k = (lambda n_t, point_weights, g_pull_back : 
-    (1 / n_t) * np.sum ( np.vectorize(vol_k_integrand, signature='(),()->()')(point_weights, g_pull_back) ))
+volume_k = (lambda point_weights, g_pull_back : 
+    (1 / len(point_weights)) * np.sum(np.vectorize(vol_k_integrand, signature='(),()->()')(point_weights, g_pull_back)))
 
 def vol_k_integrand(point_weight, g_pull_back):
     point, weight = point_weight
