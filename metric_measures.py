@@ -5,7 +5,24 @@ import numdifftools as nd
 from joblib import Parallel, delayed
 from functools import * 
 
-def sigma_error(g_pull_back, point_weights):
+metric_point_weight_dtype = np.dtype([
+    ('metric', np.complex64, (3, 3)), 
+    ('point_weight', fq.point_weight_dtype), 
+])
+
+def sigma_error(g_point_weights):
+    """ Calculates sigma error for a given set of 3-tuples containing point-weight pairs and corresponding local pull-back metric """
+    n_t = len(g_point_weights)
+    vol_cy = volume_cy(g_point_weights['point_weight'])
+    #dummy lambda necessary when calculating `g_pull_back` prior to calling `sigma_error`
+    vol_k = (1 / n_t) * np.sum([ vol_k_integrand(gpw['point_weight'], (lambda _ : gpw['metric'])) 
+        for gpw in g_point_weights ]) 
+    sigma_integrand = np.vectorize(lambda gpw : np.abs(1 - quintic_kahler_form_determinant(gpw['metric']) 
+            * vol_cy / (omega_wedge_omega_conj(gpw['point_weight']['point']) * vol_k ) ) * gpw['point_weight']['weight'], 
+            signature='()->()')
+    return (n_t * vol_cy) ** (-1) * sum(sigma_integrand(g_point_weights))
+
+def __sigma_error(g_pull_back, point_weights):
     vol_cy = volume_cy(point_weights)
     vol_k = volume_k(point_weights, g_pull_back)
     n_t = len(point_weights)
@@ -18,7 +35,7 @@ def sigma_error(g_pull_back, point_weights):
         return (n_t * vol_cy) ** (-1) * sum(sigma_acc_part)
 
 def sigma(k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
-    return sigma_error(g_pull_back=lambda p : fq.pull_back(k, h_balanced, p), 
+    return __sigma_error(g_pull_back=lambda p : fq.pull_back(k, h_balanced, p), 
         point_weights=generator(k, n_t))
 
 def global_ricci_scalar (k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
