@@ -31,8 +31,6 @@ def find_kahler_form(point):
     w_fs_form = fubini_study_kahler_form(point)
     return np.einsum('ia,ij,jb -> ab', jac, w_fs_form, jac_bar)
 
-elim_z_j = lambda z : (-1) - np.sum(z[good_coord_mask(z)] ** 5)
-
 def jacobian(z):
     select = good_coord_mask(z)
     partials = -(z[select] / elim_z_j(z)) ** 4
@@ -49,6 +47,8 @@ def fubini_study_kahler_form(point):
     return ((1 / np.pi) * (np.sum(np.abs(point) ** 2) ) ** (-2) 
         * ( (np.sum(np.abs(point) ** 2)) * np.eye(COORDINATES) - np.outer(np.conj(point), point) ))
 
+elim_z_j = lambda z : (-1) - np.sum(z[good_coord_mask(z)] ** 5)
+
 affine_coord = lambda p : np.isclose(p, np.complex(1, 0)) 
 
 good_coord_mask = lambda x: (x != x[find_max_dq_coord_index(x)]) & (affine_coord(x) == False) 
@@ -57,9 +57,8 @@ max_dq_coord = lambda p : p[find_max_dq_coord_index(p)]
 
 def find_max_dq_coord_index(point):
     """accepts point in affine patch"""
-    dq_abs = lambda p : np.absolute([5 * z ** 4 for z in p])
-    dq_abs_max_index = lambda func, p : np.argmax(np.ma.array(func(p),
-        mask=np.isclose(p,np.complex(1, 0)) ))
+    dq_abs = lambda z : np.abs(5 * z ** 4)
+    dq_abs_max_index = lambda func, p : np.argmax(np.ma.array(func(p), mask=affine_coord(p) ))
     return dq_abs_max_index(dq_abs, point)
 
 def to_affine_patch(point):

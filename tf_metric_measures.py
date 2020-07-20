@@ -8,9 +8,8 @@ COORDINATES = 5
     g_point_weights = [ [...point, ...weight, ...determinant ], ...]
 """
 
-def sigma_error_tf(g_point_weights : tf.Tensor) -> tf.float64:
+def sigma_error(g_point_weights : tf.Tensor) -> tf.float64:
     """ tensorflow implementation of sigma error """
-
     n_t = len(g_point_weights)
     weights = tf.math.real(g_point_weights[:, COORDINATES])
     vol_cy = volume_cy(weights)
@@ -28,7 +27,7 @@ good_coord_mask = lambda x: (x != x[find_max_dq_coord_index(x)]) & exclude_affin
 
 find_max_dq_coord_index = lambda p : tf.argmax(tf.abs(tf.math.pow(tf.boolean_mask(p, exclude_affine_mask(p)), 4)))
 
-exclude_affine_mask = lambda p : (tf.math.equal(p, tf.complex(1.,0.)) == False)
+exclude_affine_mask = lambda p : (tf.math.equal(p, tf.cast(tf.complex(1.,0.), dtype=tf.complex128)) == False)
 
 omega_wedge_omega_conj = lambda point : 5 ** (-2) * tf.abs(elim_z_j(point)) ** (-8)
 
