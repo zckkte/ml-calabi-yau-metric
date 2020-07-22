@@ -23,9 +23,9 @@ def main():
     model = config_model()
     features = struct_point_weights_to_ndarray(fq.quintic_point_weights(10000))
     optimizer = keras.optimizers.Adam(learning_rate=LEARNING_RATE)
-    model.compile(optimizer = optimizer,loss=sigma_error_loss, metrics=['accuracy', 'loss'])
-    model.fit_generator(generator=generator(features, None, batch_size=4), 
-        validation_data=None, steps_per_epoch=None, epochs=5, verbose=True)
+    model.compile(optimizer = optimizer,loss=sigma_loss(sample_size=80), metrics=['accuracy', 'loss'])
+    model.fit(x=features, y=features, batch_size=100, epochs=5, verbose=True)
+    #model.fit_generator(generator=generator(features, None, batch_size=100), validation_data=None, steps_per_epoch=None, epochs=5, verbose=True)
 
 struct_point_weights_to_ndarray = (lambda point_weights : 
     np.array(list(map(lambda pw : np.append(pw['point'], pw['weight']), point_weights)) ))
@@ -34,7 +34,7 @@ def generator(features, labels, batch_size):
     while True:
         indices = np.random.choice(len(features), batch_size)
         batch_features = np.take(features, indices)
-        yield batch_features, np.zeros((len(features), ))
+        yield batch_features, None
 
 def config_model():
     model = keras.Sequential()
@@ -42,7 +42,13 @@ def config_model():
     model.add(keras.layers.Dense(64, activation="relu"))
     model.add(keras.layers.Dense(128, activation="relu"))
     model.add(keras.layers.Dense((COORDINATES - 2) ** 2))
+    model.add(keras.layers.Lambda(lambda x : tf.reshape(x, (100, COORDINATES-2, COORDINATES-2)) ))
     return model
+
+def sigma_loss(sample_size): 
+    sigma_error_vec = lambda pairs : tf.foldl (lambda sigma_acc, pair : sigma_acc + tf_metric_measures.sigma_error(pair), pairs, 0.)
+    sigma= lambda sample_pairs : tf.map_fn( lambda pairs : sigma_error_vec(pairs), sample_pairs, dtype=tf.float64)  
+    return lambda y_true, y_pred : sigma(sample_point_pairs(concat_point_weight_det(y_true, y_pred), sample_size))
 
 def sigma_error_loss(x_true, sample_size): 
     if sample_size > len(x_true):
@@ -57,11 +63,14 @@ def concat_point_weight_det(point_weights, metrics):
     return tf.concat([ point_weights, tf.expand_dims(determinants, 1)], axis=1)
 
 def sample_point_pairs(metric_point_weights, sample_size):
-    exclude = lambda x, arr : list(filter(lambda p : tf.reduce_all( tf.equal(p, x) ) == False, arr) )
+    exclude_mask = (lambda x, arr : tf.map_fn(lambda p : tf.reduce_all( tf.equal(p, x) ) == False,  
+        arr, dtype=tf.bool))
+    exclude = lambda x, arr : tf.boolean_mask(arr, exclude_mask(x, arr))
     sample_with_exclude = lambda x, arr : random_choice(exclude(x, arr), sample_size, axis=0) 
-    samples = [ tf.convert_to_tensor( list(map(lambda y : np.array([x, y]), sample_with_exclude(x, metric_point_weights))) ) 
-        for x in metric_point_weights ]
-    return tf.convert_to_tensor(samples)
+    sample_tuples = (tf.map_fn(lambda x : 
+        tf.map_fn(lambda y : tf.stack([x, y]), sample_with_exclude(x, metric_point_weights)), 
+        metric_point_weights))
+    return sample_tuples
 
 def random_choice(x, size, axis=0, unique=True):
     dim_x = tf.cast(tf.shape(x)[axis], tf.int64)

@@ -10,9 +10,9 @@ COORDINATES = 5
 
 def sigma_error(g_point_weights : tf.Tensor) -> tf.float64:
     """ tensorflow implementation of sigma error """
-    n_t = len(g_point_weights)
+    n_t = g_point_weights.shape[0] 
     weights = tf.math.real(g_point_weights[:, COORDINATES])
-    vol_cy = volume_cy(weights)
+    vol_cy = volume_cy(n_t, weights)
     vol_k = volume_k(n_t, g_point_weights)
 
     return ((n_t * vol_cy) ** (-1) * tf.foldl(lambda acc, gpw : 
@@ -31,7 +31,7 @@ exclude_affine_mask = lambda p : (tf.math.equal(p, tf.cast(tf.complex(1.,0.), dt
 
 omega_wedge_omega_conj = lambda point : 5 ** (-2) * tf.abs(elim_z_j(point)) ** (-8)
 
-volume_cy = lambda weights : (1 / len(weights)) * tf.math.reduce_sum(weights) 
+volume_cy = lambda n_t, weights : (1 / n_t) * tf.math.reduce_sum(weights) 
 
 __point = lambda g_point_weight : g_point_weight[0:COORDINATES] 
 
