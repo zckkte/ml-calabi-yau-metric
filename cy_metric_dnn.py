@@ -20,15 +20,15 @@ COORDINATES = 5
 LEARNING_RATE = 1e-4
 
 def main():
-    model = config_model()
-    features = struct_point_weights_to_ndarray(fq.quintic_point_weights(10000))
+    batch_size=100
+    model = config_model(batch_size=batch_size)
+    features = convert_to_ndarray(fq.quintic_point_weights(10000))
     optimizer = keras.optimizers.Adam(learning_rate=LEARNING_RATE)
-    model.compile(optimizer = optimizer,loss=sigma_loss(sample_size=80), metrics=['accuracy', 'loss'])
-    model.fit(x=features, y=features, batch_size=100, epochs=5, verbose=True)
-    #model.fit_generator(generator=generator(features, None, batch_size=100), validation_data=None, steps_per_epoch=None, epochs=5, verbose=True)
+    model.compile(optimizer = optimizer,loss=sigma_loss(sample_size=80), metrics=['accuracy'])
+    model.fit(x=features, y=features, batch_size=batch_size, epochs=5, verbose=True)
 
-struct_point_weights_to_ndarray = (lambda point_weights : 
-    np.array(list(map(lambda pw : np.append(pw['point'], pw['weight']), point_weights)) ))
+convert_to_ndarray = (lambda point_weights : 
+    np.array(list(map(lambda pw : np.append(pw['point'].view(np.float32), pw['weight']), point_weights)) ))
 
 def generator(features, labels, batch_size):
     while True:
@@ -36,55 +36,69 @@ def generator(features, labels, batch_size):
         batch_features = np.take(features, indices)
         yield batch_features, None
 
-def config_model():
+def config_model(batch_size):
     model = keras.Sequential()
-    model.add(keras.layers.Dense(32, activation='relu', input_shape=(COORDINATES+1, )))
+    model.add(keras.layers.Input(shape=(2 * COORDINATES + 1, )))
+    model.add(keras.layers.Dense(32, activation='relu'))
     model.add(keras.layers.Dense(64, activation="relu"))
     model.add(keras.layers.Dense(128, activation="relu"))
-    model.add(keras.layers.Dense((COORDINATES - 2) ** 2))
-    model.add(keras.layers.Lambda(lambda x : tf.reshape(x, (100, COORDINATES-2, COORDINATES-2)) ))
+    model.add(keras.layers.Dense((COORDINATES * 2) + 2))
+    model.add(keras.layers.Lambda(lambda batch : tf.map_fn(lambda y : to_hermitian(y), batch) )) #issue here unresolved
     return model
 
+def fill_triangular(x):
+    m = x.shape[0]
+    n = tf.cast(tf.math.sqrt(.25 + 2 * m) - .5, tf.int32)
+    x_tail = x[(m - (n**2 - m)):]
+    x = tf.reshape( tf.concat([x, x_tail[::-1]], 0), (n, n))
+    return tf.linalg.band_part(x, 0, -1)
+
+def to_hermitian(x):
+    real, imag = x[::2], x[1::2]
+    values = tf.complex(real, imag) 
+    dig_upper = fill_triangular(values)
+    lower_tri = tf.transpose(tf.linalg.band_part(dig_upper, 0, -1), conjugate=True) 
+    return dig_upper + lower_tri
+
 def sigma_loss(sample_size): 
-    sigma_error_vec = lambda pairs : tf.foldl (lambda sigma_acc, pair : sigma_acc + tf_metric_measures.sigma_error(pair), pairs, 0.)
-    sigma= lambda sample_pairs : tf.map_fn( lambda pairs : sigma_error_vec(pairs), sample_pairs, dtype=tf.float64)  
-    return lambda y_true, y_pred : sigma(sample_point_pairs(concat_point_weight_det(y_true, y_pred), sample_size))
+    sigma_error_vec = lambda pairs : tf.foldl (lambda sigma_acc, pair : sigma_acc 
+        + tf_metric_measures.sigma_error(pair), pairs, 0.)
+    sigma= lambda sample_pairs : tf.map_fn( lambda pairs : sigma_error_vec(pairs), sample_pairs, dtype=tf.float32)  
+    return lambda x_true, y_pred : sigma(sample_tuples(concat_point_weight_det(x_true, y_pred), sample_size))
 
-def sigma_error_loss(x_true, sample_size): 
-    if sample_size > len(x_true):
-        raise ValueError("sample_size must not exceed length of x_true argument" )
+def to_complex_point_weight(x_true):
+    point_real = x_true[:, 0:COORDINATES * 2][:, ::2]
+    point_imag = x_true[:, 0:COORDINATES * 2][:, 1::2]
+    point_complex = tf.complex(point_real, point_imag)
+    weights = x_true[:, -1]
+    return tf.concat([point_complex, cast_expand_dim (weights)], axis=1)
 
-    sigma_error_vec = lambda pairs : tf.foldl (lambda sigma_acc, pair : sigma_acc + tf_metric_measures.sigma_error(pair), pairs, 0.)
-    sigma= lambda sample_pairs : tf.map_fn( lambda pairs : sigma_error_vec(pairs), sample_pairs, dtype=tf.float64)  
-    return lambda y_true, y_pred : sigma(sample_point_pairs(concat_point_weight_det(x_true, y_pred), sample_size))
-
-def concat_point_weight_det(point_weights, metrics):
+def concat_point_weight_det(x_true, metrics):
     determinants = tf.linalg.det(metrics)
-    return tf.concat([ point_weights, tf.expand_dims(determinants, 1)], axis=1)
+    return tf.concat([ to_complex_point_weight(x_true), cast_expand_dim(determinants) ], axis=1)
 
-def sample_point_pairs(metric_point_weights, sample_size):
+cast_expand_dim = lambda arr : tf.cast(tf.expand_dims(arr, 1), dtype=tf.complex64)
+
+def sample_tuples(metric_point_weights, sample_size):
     exclude_mask = (lambda x, arr : tf.map_fn(lambda p : tf.reduce_all( tf.equal(p, x) ) == False,  
         arr, dtype=tf.bool))
     exclude = lambda x, arr : tf.boolean_mask(arr, exclude_mask(x, arr))
     sample_with_exclude = lambda x, arr : random_choice(exclude(x, arr), sample_size, axis=0) 
-    sample_tuples = (tf.map_fn(lambda x : 
-        tf.map_fn(lambda y : tf.stack([x, y]), sample_with_exclude(x, metric_point_weights)), 
-        metric_point_weights))
-    return sample_tuples
+    stack_map = lambda x, arr : tf.map_fn(lambda y : tf.stack([x, y]), arr)
+
+    return tf.map_fn(lambda x : stack_map(x, sample_with_exclude(x, metric_point_weights)), metric_point_weights)
 
 def random_choice(x, size, axis=0, unique=True):
     dim_x = tf.cast(tf.shape(x)[axis], tf.int64)
     indices = tf.range(0, dim_x, dtype=tf.int64)
     sample_index = tf.random.shuffle(indices)[:size]
-    sample = tf.gather(x, sample_index, axis=axis)
-    return sample
+    return tf.gather(x, sample_index, axis=axis)
 
 def __main_test():
     y_pred = tf.convert_to_tensor([ initial_balanced_metric(3) for _ in range(10) ])
-    x_true = tf.convert_to_tensor(list(map(lambda pw : np.append(pw['point'], pw['weight']), 
-        fq.quintic_point_weights(10))))
+    x_true = tf.convert_to_tensor(convert_to_ndarray(fq.quintic_point_weights(10)))
     sample_size=4
-    print(sigma_error_loss(x_true, sample_size)(None, y_pred))
+    print(sigma_loss(sample_size)(x_true, y_pred))
 
 if __name__ == '__main__':
     main()

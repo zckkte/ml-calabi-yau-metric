@@ -4,22 +4,21 @@ import tensorflow as tf
 
 COORDINATES = 5
 
-"""
-    g_point_weights = [ [...point, ...weight, ...determinant ], ...]
-"""
-
 def sigma_error(g_point_weights : tf.Tensor) -> tf.float64:
-    """ tensorflow implementation of sigma error """
+    """ tensorflow implementation of sigma error 
+        g_point_weights = [ [...point, ...weight, ...determinant ], ...]
+    """
     n_t = g_point_weights.shape[0] 
     weights = tf.math.real(g_point_weights[:, COORDINATES])
     vol_cy = volume_cy(n_t, weights)
     vol_k = volume_k(n_t, g_point_weights)
 
-    return ((n_t * vol_cy) ** (-1) * tf.foldl(lambda acc, gpw : 
-            acc + tf.abs(1 - __determinant(gpw) * vol_cy / (omega_wedge_omega_conj(__point(gpw)) * vol_k )) * __weight(gpw), 
+    return ((n_t * vol_cy) ** (-1) * tf.foldl(lambda acc, gpw : acc 
+            + tf.abs(1 - __determinant(gpw) * vol_cy / (omega_wedge_omega_conj(__point(gpw)) * vol_k )) * __weight(gpw), 
             g_point_weights, 0.))
 
-volume_k = lambda n_t, g_point_weights : (1 / n_t) * tf.foldl(lambda acc, gpw : acc + vol_k_integrand(gpw), g_point_weights, 0.) 
+volume_k = lambda n_t, g_point_weights : ((1 / n_t) * tf.foldl(lambda acc, gpw : acc 
+    + vol_k_integrand(gpw), g_point_weights, 0.) )
 
 elim_z_j = lambda z : (-1) - tf.reduce_sum(z[good_coord_mask(z)] ** 5)
 
@@ -27,7 +26,7 @@ good_coord_mask = lambda x: (x != x[find_max_dq_coord_index(x)]) & exclude_affin
 
 find_max_dq_coord_index = lambda p : tf.argmax(tf.abs(tf.math.pow(tf.boolean_mask(p, exclude_affine_mask(p)), 4)))
 
-exclude_affine_mask = lambda p : (tf.math.equal(p, tf.cast(tf.complex(1.,0.), dtype=tf.complex128)) == False)
+exclude_affine_mask = lambda p : (tf.math.equal(p, tf.cast(tf.complex(1.,0.), dtype=tf.complex64)) == False)
 
 omega_wedge_omega_conj = lambda point : 5 ** (-2) * tf.abs(elim_z_j(point)) ** (-8)
 
