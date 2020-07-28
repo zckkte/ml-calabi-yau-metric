@@ -26,25 +26,23 @@ def main():
     optimizer = keras.optimizers.Adam(learning_rate=LEARNING_RATE)
     model.compile(optimizer = optimizer,loss=sigma_loss(sample_size=80), metrics=['accuracy'])
     model.fit(x=features, y=features, batch_size=batch_size, epochs=5, verbose=True)
+    # consider custom training loop
 
 convert_to_ndarray = (lambda point_weights : 
-    np.array(list(map(lambda pw : np.append(pw['point'].view(np.float32), pw['weight']), point_weights)) ))
-
-def generator(features, labels, batch_size):
-    while True:
-        indices = np.random.choice(len(features), batch_size)
-        batch_features = np.take(features, indices)
-        yield batch_features, None
+    np.array(list(map(lambda pw : np.append(pw['point'].view(np.float32), pw['weight']), point_weights)), dtype=np.float32))
 
 def config_model(batch_size):
     model = keras.Sequential()
     model.add(keras.layers.Input(shape=(2 * COORDINATES + 1, )))
+    model.add(keras.layers.Lambda(lambda x : tf.map_fn(lambda y : pad_to_output_dim(y,(COORDINATES * 2) + 2), x)))
     model.add(keras.layers.Dense(32, activation='relu'))
     model.add(keras.layers.Dense(64, activation="relu"))
     model.add(keras.layers.Dense(128, activation="relu"))
     model.add(keras.layers.Dense((COORDINATES * 2) + 2))
-    model.add(keras.layers.Lambda(lambda batch : tf.map_fn(lambda y : to_hermitian(y), batch) )) #issue here unresolved
+    #model.add(keras.layers.Lambda(lambda batch : tf.map_fn(lambda y : to_hermitian(y), batch, dtype=tf.complex64) )) 
     return model
+
+pad_to_output_dim = lambda t, out_dim : tf.pad(t, [[0, tf.abs(out_dim - t.shape[0]) ]], "CONSTANT")
 
 def fill_triangular(x):
     m = x.shape[0]
@@ -64,13 +62,21 @@ def sigma_loss(sample_size):
     sigma_error_vec = lambda pairs : tf.foldl (lambda sigma_acc, pair : sigma_acc 
         + tf_metric_measures.sigma_error(pair), pairs, 0.)
     sigma= lambda sample_pairs : tf.map_fn( lambda pairs : sigma_error_vec(pairs), sample_pairs, dtype=tf.float32)  
-    return lambda x_true, y_pred : sigma(sample_tuples(concat_point_weight_det(x_true, y_pred), sample_size))
+
+    #HACK: abusing y_true argument for the purpose of providing x_true as input to loss function
+    return lambda x_true, y_pred : \
+        sigma(sample_tuples(concat_point_weight_det(x_true, extract_y_pred_to_hermitian(y_pred)), sample_size))
+
+#HACK: keras does not allow for y_true and y_pred to be of differring shape
+extract_y_pred_to_hermitian = lambda y_pred: \
+    tf.map_fn(lambda y : to_hermitian( y[0:2*COORDINATES+2]), y_pred, dtype=tf.complex64)
 
 def to_complex_point_weight(x_true):
     point_real = x_true[:, 0:COORDINATES * 2][:, ::2]
     point_imag = x_true[:, 0:COORDINATES * 2][:, 1::2]
     point_complex = tf.complex(point_real, point_imag)
     weights = x_true[:, -1]
+
     return tf.concat([point_complex, cast_expand_dim (weights)], axis=1)
 
 def concat_point_weight_det(x_true, metrics):
