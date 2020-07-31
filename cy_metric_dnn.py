@@ -1,46 +1,50 @@
+from time import time
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras as keras
+import tf_metric_measures 
 import fermat_quintic as fq
 from donaldson import donaldson, initial_balanced_metric
-from metric_measures import sigma_error, metric_point_weight_dtype
-import tf_metric_measures 
 
-# training point, determinant  
-
-# - determinant - optimal reproduce for given k 
-# - metric - for batches 
-
-# pull-back metric - what are our features? point weights
-#   what are our labels? inner product of two points? or is it the metric itself?
-#   
-
-#input size of COORDINATES
 COORDINATES = 5
 LEARNING_RATE = 1e-4
 
-def main():
-    batch_size=100
-    model = config_model(batch_size=batch_size)
-    features = convert_to_ndarray(fq.quintic_point_weights(10000))
-    optimizer = keras.optimizers.Adam(learning_rate=LEARNING_RATE)
-    model.compile(optimizer = optimizer,loss=sigma_loss(sample_size=80), metrics=['accuracy'])
-    model.fit(x=features, y=features, batch_size=batch_size, epochs=5, verbose=True)
-    # consider custom training loop
+def main(epochs=3, batch_size=32, sample_size = 4, no_of_samples = 10000):
+    model = config_model()
+    model.compile(optimizer = keras.optimizers.Adam(learning_rate=LEARNING_RATE), metrics=['accuracy'])
+
+    features = convert_to_ndarray(fq.quintic_point_weights(no_of_samples))
+    train_dataset = tf.data.Dataset.from_tensor_slices((features, features))
+    train_dataset = train_dataset.shuffle(buffer_size=1024).batch(batch_size)
+    model = model_train(model, train_dataset, sample_size, epochs)
+
+    model.save('%d_model_b%d_s%d_n%d.h5' % (int(time()), batch_size, sample_size, no_of_samples))
 
 convert_to_ndarray = (lambda point_weights : 
     np.array(list(map(lambda pw : np.append(pw['point'].view(np.float32), pw['weight']), point_weights)), dtype=np.float32))
 
-def config_model(batch_size):
+def model_train(model, train_dataset, sample_size=4, epochs=5):
+    for epoch in range(1, epochs + 1):
+        print("epoch %d/%d\n" % (epoch, epochs))
+        for _, (x_batch_train, _) in enumerate(train_dataset):
+            with tf.GradientTape() as tape:
+                logits = model(x_batch_train, training=True)
+                losses = sigma_loss(sample_size)(x_batch_train, logits)
+            grads = tape.gradient(losses, model.trainable_weights)
+            model.optimizer.apply_gradients(zip(grads, model.trainable_weights))
+    return model
+
+def config_model():
     model = keras.Sequential()
     model.add(keras.layers.Input(shape=(2 * COORDINATES + 1, )))
-    model.add(keras.layers.Lambda(lambda x : tf.map_fn(lambda y : pad_to_output_dim(y,(COORDINATES * 2) + 2), x)))
+    model.add(keras.layers.Lambda(pad_input))
     model.add(keras.layers.Dense(32, activation='relu'))
     model.add(keras.layers.Dense(64, activation="relu"))
     model.add(keras.layers.Dense(128, activation="relu"))
     model.add(keras.layers.Dense((COORDINATES * 2) + 2))
-    #model.add(keras.layers.Lambda(lambda batch : tf.map_fn(lambda y : to_hermitian(y), batch, dtype=tf.complex64) )) 
     return model
+
+pad_input = lambda x : tf.map_fn(lambda y : pad_to_output_dim(y,(COORDINATES * 2) + 2), x)
 
 pad_to_output_dim = lambda t, out_dim : tf.pad(t, [[0, tf.abs(out_dim - t.shape[0]) ]], "CONSTANT")
 
@@ -65,11 +69,11 @@ def sigma_loss(sample_size):
 
     #HACK: abusing y_true argument for the purpose of providing x_true as input to loss function
     return lambda x_true, y_pred : \
-        sigma(sample_tuples(concat_point_weight_det(x_true, extract_y_pred_to_hermitian(y_pred)), sample_size))
+        sigma(sample_tuples(concat_point_weight_det(x_true[:, 0:2 * COORDINATES + 1], \
+            extract_y_pred_to_hermitian(y_pred)), sample_size))
 
-#HACK: keras does not allow for y_true and y_pred to be of differring shape
-extract_y_pred_to_hermitian = lambda y_pred: \
-    tf.map_fn(lambda y : to_hermitian( y[0:2*COORDINATES+2]), y_pred, dtype=tf.complex64)
+#HACK: keras does not allow for y_true and y_pred to be of differring shapes 
+extract_y_pred_to_hermitian = lambda y_pred: tf.map_fn(lambda y : to_hermitian(y), y_pred, dtype=tf.complex64)
 
 def to_complex_point_weight(x_true):
     point_real = x_true[:, 0:COORDINATES * 2][:, ::2]
@@ -99,12 +103,6 @@ def random_choice(x, size, axis=0, unique=True):
     indices = tf.range(0, dim_x, dtype=tf.int64)
     sample_index = tf.random.shuffle(indices)[:size]
     return tf.gather(x, sample_index, axis=axis)
-
-def __main_test():
-    y_pred = tf.convert_to_tensor([ initial_balanced_metric(3) for _ in range(10) ])
-    x_true = tf.convert_to_tensor(convert_to_ndarray(fq.quintic_point_weights(10)))
-    sample_size=4
-    print(sigma_loss(sample_size)(x_true, y_pred))
 
 if __name__ == '__main__':
     main()
