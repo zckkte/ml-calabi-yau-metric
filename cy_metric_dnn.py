@@ -25,7 +25,7 @@ convert_to_ndarray = (lambda point_weights :
 
 def model_train(model, train_dataset, sample_size=4, epochs=5):
     for epoch in range(1, epochs + 1):
-        print("epoch %d/%d\n" % (epoch, epochs))
+        print("epoch %d/%d" % (epoch, epochs))
         for _, (x_batch_train, _) in enumerate(train_dataset):
             with tf.GradientTape() as tape:
                 logits = model(x_batch_train, training=True)

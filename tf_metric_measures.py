@@ -5,7 +5,7 @@ import tensorflow as tf
 COORDINATES = 5
 PURELY_REAL = tf.cast(tf.complex(1.,0.), dtype=tf.complex64)
 
-def sigma_error(g_point_weights : tf.Tensor) -> tf.float64:
+def sigma_error(g_point_weights):
     """ tensorflow implementation of sigma error 
         g_point_weights = [ [...point, ...weight, ...determinant ], ...]
     """
