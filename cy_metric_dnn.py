@@ -1,3 +1,4 @@
+import argparse
 from time import time
 import numpy as np
 import tensorflow as tf
@@ -9,7 +10,7 @@ from donaldson import donaldson, initial_balanced_metric
 COORDINATES = 5
 LEARNING_RATE = 1e-4
 
-def main(epochs=3, batch_size=32, sample_size = 4, no_of_samples = 10000):
+def main(epochs=3, batch_size=32, sample_size=20, no_of_samples = 10000):
     model = config_model()
     model.compile(optimizer = keras.optimizers.Adam(learning_rate=LEARNING_RATE), metrics=['accuracy'])
 
@@ -26,21 +27,29 @@ convert_to_ndarray = (lambda point_weights :
 def model_train(model, train_dataset, sample_size=4, epochs=5):
     for epoch in range(1, epochs + 1):
         print("epoch %d/%d" % (epoch, epochs))
-        for _, (x_batch_train, _) in enumerate(train_dataset):
-            with tf.GradientTape() as tape:
-                logits = model(x_batch_train, training=True)
-                losses = sigma_loss(sample_size)(x_batch_train, logits)
-            grads = tape.gradient(losses, model.trainable_weights)
-            model.optimizer.apply_gradients(zip(grads, model.trainable_weights))
+        for step, (x_batch_train, _) in enumerate(train_dataset): 
+            losses = model_train_step(model, x_batch_train, sample_size)
+            if step % 50 == 0: 
+                #log every 50th batch loss
+                print('batch loss: %f, avg. loss: %f' % ( tf.reduce_sum(losses), tf.math.reduce_mean(losses)))
     return model
+
+@tf.function
+def model_train_step(model, x_batch_train, sample_size):
+    with tf.GradientTape() as tape:
+        logits = model(x_batch_train, training=True)
+        losses = sigma_loss(sample_size)(x_batch_train, logits)
+    grads = tape.gradient(losses, model.trainable_weights)
+    model.optimizer.apply_gradients(zip(grads, model.trainable_weights))
+    return losses
 
 def config_model():
     model = keras.Sequential()
     model.add(keras.layers.Input(shape=(2 * COORDINATES + 1, )))
     model.add(keras.layers.Lambda(pad_input))
-    model.add(keras.layers.Dense(32, activation='relu'))
-    model.add(keras.layers.Dense(64, activation="relu"))
     model.add(keras.layers.Dense(128, activation="relu"))
+    model.add(keras.layers.Dense(64, activation="relu"))
+    model.add(keras.layers.Dense(32, activation='relu'))
     model.add(keras.layers.Dense((COORDINATES * 2) + 2))
     return model
 
@@ -104,5 +113,14 @@ def random_choice(x, size, axis=0, unique=True):
     sample_index = tf.random.shuffle(indices)[:size]
     return tf.gather(x, sample_index, axis=axis)
 
+def parser_config():
+    parser = argparse.ArgumentParser(description='')
+    parser.add_argument('-e', type=int, required=True, help='number of epochs')
+    parser.add_argument('-b', type=int, required=True, help='batch size')
+    parser.add_argument('-s', type=int, required=True, help='loss sample size')
+    parser.add_argument('-N', type=int, default=100000, help='number of sample points')
+    return parser
+
 if __name__ == '__main__':
-    main()
+    args = parser_config().parse_args()
+    main(epochs=args.e, batch_size=args.b, sample_size=args.s, no_of_samples=args.N)
