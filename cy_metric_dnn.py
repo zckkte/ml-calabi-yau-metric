@@ -9,10 +9,6 @@ from donaldson import donaldson, initial_balanced_metric
 
 COORDINATES = 5
 LEARNING_RATE = 1e-4
-tf.compat.v1.flags.DEFINE_string('e', '', '')
-tf.compat.v1.flags.DEFINE_string('b', '', '')
-tf.compat.v1.flags.DEFINE_string('s', '', '')
-tf.compat.v1.flags.DEFINE_string('N', '', '')
 
 def main(epochs=3, batch_size=32, sample_size=28, no_of_samples = 10000):
     model = config_model()
