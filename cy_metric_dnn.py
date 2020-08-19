@@ -9,6 +9,10 @@ from donaldson import donaldson, initial_balanced_metric
 
 COORDINATES = 5
 LEARNING_RATE = 1e-4
+tf.compat.v1.flags.DEFINE_string('e', '', '')
+tf.compat.v1.flags.DEFINE_string('b', '', '')
+tf.compat.v1.flags.DEFINE_string('s', '', '')
+tf.compat.v1.flags.DEFINE_string('N', '', '')
 
 def main(epochs=3, batch_size=32, sample_size=28, no_of_samples = 10000):
     model = config_model()
@@ -25,21 +29,18 @@ convert_to_ndarray = (lambda point_weights :
     np.array(list(map(lambda pw : np.append(pw['point'].view(np.float32), pw['weight']), point_weights)), dtype=np.float32))
 
 def model_train(model, train_dataset, batch_size, sample_size=4, epochs=5):
+    loss_func = sigma_loss(sample_size, batch_size)
     for epoch in range(1, epochs + 1):
         print("epoch %d/%d" % (epoch, epochs))
         for step, (x_batch_train, _) in enumerate(train_dataset): 
-            losses = model_train_step(model, x_batch_train, sample_size, batch_size)
+            with tf.GradientTape() as tape:
+                logits = model(x_batch_train, training=True)
+                losses = loss_func(x_batch_train, logits)
+            grads = tape.gradient(losses, model.trainable_weights)
+            model.optimizer.apply_gradients(zip(grads, model.trainable_weights))
             if step % 50 == 0: 
                 print('batch loss: %f, avg. loss: %f' % ( tf.reduce_sum(losses), tf.math.reduce_mean(losses)))
     return model
-
-def model_train_step(model, x_batch_train, sample_size, batch_size):
-    with tf.GradientTape() as tape:
-        logits = model(x_batch_train, training=True)
-        losses = sigma_loss(sample_size, batch_size)(x_batch_train, logits)
-    grads = tape.gradient(losses, model.trainable_weights)
-    model.optimizer.apply_gradients(zip(grads, model.trainable_weights))
-    return losses
 
 def config_model():
     model = keras.Sequential()
@@ -48,26 +49,23 @@ def config_model():
     model.add(keras.layers.Dense(128, activation="relu"))
     model.add(keras.layers.Dense(64, activation="relu"))
     model.add(keras.layers.Dense(32, activation='relu'))
-    model.add(keras.layers.Dense((COORDINATES * 2) + 2))
+    model.add(keras.layers.Dense((COORDINATES * 2) - 1))
     return model
 
 pad_input = lambda x : tf.vectorized_map(lambda y : pad_to_output_dim(y,(COORDINATES * 2) + 2), x)
 
 pad_to_output_dim = lambda t, out_dim : tf.pad(t, [[0, tf.abs(out_dim - t.shape[0]) ]], "CONSTANT")
 
-def fill_triangular(x):
-    m = x.shape[0]
-    n = tf.cast(tf.math.sqrt(.25 + 2 * m) - .5, tf.int32)
-    x_tail = x[(m - (n**2 - m)):]
-    x = tf.reshape( tf.concat([x, x_tail[::-1]], 0), (n, n))
-    return tf.linalg.band_part(x, 0, -1)
+diagonal = lambda x : tf.cast(x[:COORDINATES - 2], dtype=tf.complex64)
+rest = lambda x : x[COORDINATES - 2:]
 
 def to_hermitian(x):
-    real, imag = x[::2], x[1::2]
-    values = tf.complex(real, imag) 
-    dig_upper = fill_triangular(values)
-    lower_tri =tf.math.conj(tf.transpose(tf.linalg.set_diag(dig_upper, tf.zeros(3, dtype=tf.complex64))))
-    return dig_upper + lower_tri
+    diag, tail = diagonal(x), rest(x)
+    values = tf.complex(tail[::2], tail[1::2])
+    upper_tri = tf.scatter_nd(indices=tf.constant([[0, 1], [0, 2], [1, 2]]), updates=values, 
+        shape=tf.constant([3, 3]))
+    lower_tri =tf.math.conj(tf.transpose(upper_tri))
+    return tf.linalg.set_diag(upper_tri + lower_tri, diag) 
 
 def sigma_loss(sample_size, batch_size): 
     sigma_error_vec = lambda pairs : tf.foldl (lambda sigma_acc, pair : sigma_acc 
@@ -78,10 +76,11 @@ def sigma_loss(sample_size, batch_size):
     #HACK: abusing y_true argument for the purpose of providing x_true as input to loss function
     return tf.function(lambda x_true, y_pred : \
         sigma(sample_tuples(concat_point_weight_det(x_true[:, 0:2 * COORDINATES + 1], \
-            extract_y_pred_to_hermitian(y_pred, batch_size )), sample_size, batch_size )) )
+            extract_y_pred_to_hermitian(y_pred, batch_size)), sample_size, batch_size )) )
 
 #HACK: keras does not allow for y_true and y_pred to be of differring shapes 
-extract_y_pred_to_hermitian = tf.function(lambda y_pred, batch_size : tf.vectorized_map(to_hermitian, y_pred))
+extract_y_pred_to_hermitian = lambda y_pred, batch_size : tf.map_fn(to_hermitian, y_pred, 
+    dtype=tf.complex64, parallel_iterations=batch_size)
 
 def to_complex_point_weight(x_true):
     point_real = x_true[:, 0:COORDINATES * 2][:, ::2]
