@@ -26,7 +26,7 @@ convert_to_ndarray = (lambda point_weights :
 
 def model_train(model, train_dataset, batch_size, sample_size=4, epochs=5):
     loss_func = sigma_loss(sample_size, batch_size)
-    for epoch in range(1, epochs + 1):
+    for epoch in tf.range(1, epochs + 1):
         print("epoch %d/%d" % (epoch, epochs))
         for step, (x_batch_train, _) in enumerate(train_dataset): 
             with tf.GradientTape() as tape:
@@ -41,42 +41,30 @@ def model_train(model, train_dataset, batch_size, sample_size=4, epochs=5):
 def config_model():
     model = keras.Sequential()
     model.add(keras.layers.Input(shape=(2 * COORDINATES + 1, )))
-    model.add(keras.layers.Lambda(pad_input))
     model.add(keras.layers.Dense(128, activation="relu"))
     model.add(keras.layers.Dense(64, activation="relu"))
     model.add(keras.layers.Dense(32, activation='relu'))
     model.add(keras.layers.Dense((COORDINATES * 2) - 1))
+    model.add(keras.layers.Lambda(to_hermitian_batch))
     return model
 
-pad_input = lambda x : tf.vectorized_map(lambda y : pad_to_output_dim(y,(COORDINATES * 2) + 2), x)
-
-pad_to_output_dim = lambda t, out_dim : tf.pad(t, [[0, tf.abs(out_dim - t.shape[0]) ]], "CONSTANT")
-
-diagonal = lambda x : tf.cast(x[:COORDINATES - 2], dtype=tf.complex64)
-rest = lambda x : x[COORDINATES - 2:]
+to_hermitian_batch = tf.function(lambda y_pred : tf.vectorized_map(to_hermitian, y_pred))
 
 def to_hermitian(x):
-    diag, tail = diagonal(x), rest(x)
-    values = tf.complex(tail[::2], tail[1::2])
-    upper_tri = tf.scatter_nd(indices=tf.constant([[0, 1], [0, 2], [1, 2]]), updates=values, 
-        shape=tf.constant([3, 3]))
-    lower_tri =tf.math.conj(tf.transpose(upper_tri))
-    return tf.linalg.set_diag(upper_tri + lower_tri, diag) 
+    t1 = tf.reshape(tf.complex(x, tf.zeros(9, dtype=tf.float32)), (3,3))
+    up = tf.linalg.band_part(t1, 0, -1)
+    low = tf.linalg.band_part(1j * t1, -1, 0)
+    out = up + tf.transpose(up) - tf.linalg.band_part(t1, 0, 0)
+    return out + low + tf.math.conj(tf.transpose(low))
 
 def sigma_loss(sample_size, batch_size): 
     sigma_error_vec = lambda pairs : tf.foldl (lambda sigma_acc, pair : sigma_acc 
         + tf_metric_measures.sigma_error(pair), pairs, 0., parallel_iterations=batch_size)
     sigma = lambda sample_pairs : tf.map_fn(sigma_error_vec, sample_pairs, dtype=tf.float32, 
-        parallel_iterations=batch_size)
+        parallel_iterations=sample_pairs.shape[0])
 
     #HACK: abusing y_true argument for the purpose of providing x_true as input to loss function
-    return tf.function(lambda x_true, y_pred : \
-        sigma(sample_tuples(concat_point_weight_det(x_true[:, 0:2 * COORDINATES + 1], \
-            extract_y_pred_to_hermitian(y_pred, batch_size)), sample_size, batch_size )) )
-
-#HACK: keras does not allow for y_true and y_pred to be of differring shapes 
-extract_y_pred_to_hermitian = lambda y_pred, batch_size : tf.map_fn(to_hermitian, y_pred, 
-    dtype=tf.complex64, parallel_iterations=batch_size)
+    return tf.function(lambda x_true, y_pred : sigma(sample_tuples(concat_point_weight_det(x_true, y_pred), sample_size)) )
 
 def to_complex_point_weight(x_true):
     point_real = x_true[:, 0:COORDINATES * 2][:, ::2]
@@ -85,24 +73,23 @@ def to_complex_point_weight(x_true):
     weights = x_true[:, -1]
     return tf.concat([point_complex, cast_expand_dim (weights)], axis=1)
 
-@tf.function
 def concat_point_weight_det(x_true, metrics):
     determinants = tf.linalg.det(metrics)
     return tf.concat([ to_complex_point_weight(x_true), cast_expand_dim(determinants) ], axis=1)
 
 cast_expand_dim = lambda arr : tf.cast(tf.expand_dims(arr, 1), dtype=tf.complex64) 
 
-@tf.function
-def sample_tuples(metric_point_weights, sample_size, batch_size):
-    exclude_mask = lambda x, arr : tf.vectorized_map(lambda p : tf.equal(tf.reduce_all(tf.equal(p, x)), False), arr)
+def sample_tuples(metric_point_weights, sample_size):
+    exclude_mask = lambda x, arr : tf.map_fn(lambda p : tf.equal(tf.reduce_all(tf.equal(p, x)), False), arr, dtype=tf.bool, 
+        parallel_iterations=arr.shape[0])
     exclude = lambda x, arr : tf.boolean_mask(arr, exclude_mask(x, arr))
 
     sample_with_exclude = lambda x, arr : random_choice(exclude(x, arr), sample_size, axis=0)
-    stack_map = lambda x, arr : tf.vectorized_map(lambda y : tf.stack([x, y]), arr)
+    stack_map = lambda x, arr : tf.map_fn(lambda y : tf.stack([x, y]), arr, parallel_iterations=arr.shape[0])
     return tf.map_fn(lambda x : stack_map(x, sample_with_exclude(x, metric_point_weights)), metric_point_weights,
-        parallel_iterations=batch_size)
+        parallel_iterations=metric_point_weights.shape[0])
 
-def random_choice(x, size, axis=0, unique=True):
+def random_choice(x, size, axis=0):
     dim_x = tf.cast(tf.shape(x)[axis], tf.int64)
     indices = tf.range(0, dim_x, dtype=tf.int64)
     sample_index = tf.random.shuffle(indices)[:size]
