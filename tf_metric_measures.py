@@ -19,8 +19,6 @@ def sigma_error(g_point_weights):
 volume_k = lambda n_t, g_point_weights : ((1 / n_t) * tf.foldl(lambda acc, gpw : acc 
     + vol_k_integrand(gpw), g_point_weights, 0., parallel_iterations=n_t) )
 
-elim_z_j = lambda z : (-1) - tf.reduce_sum(z[good_coord_mask(z)] ** 5)
-
 good_coord_mask = lambda x : (x != x[find_max_dq_coord_index(x)]) & exclude_affine_mask(x) 
 
 exclude_affine_max = lambda z_j : tf.cond(isclose(z_j, PURELY_REAL) == False, \
@@ -32,7 +30,7 @@ isclose = lambda a, b, rtol=1.e-5, atol=1.e-8 : tf.math.less_equal(tf.abs(a - b)
 
 exclude_affine_mask = lambda p : (isclose(p, PURELY_REAL) == False)
 
-omega_wedge_omega_conj = lambda point : 5 ** (-2) * tf.abs(elim_z_j(point)) ** (-8)
+omega_wedge_omega_conj = lambda point : 5 ** (-2) * tf.abs( point[find_max_dq_coord_index(point)] ) ** (-8)
 
 volume_cy = lambda n_t, weights : (1 / n_t) * tf.math.reduce_sum(weights) 
 

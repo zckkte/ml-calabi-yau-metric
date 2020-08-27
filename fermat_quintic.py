@@ -22,7 +22,7 @@ def compose(*functions):
 
 def weight(point):
     w = find_kahler_form(point)
-    z_j = elim_z_j(point)
+    z_j = point[find_max_dq_coord_index(point)]
     return np.real( (5 ** -2) * (np.abs(z_j) ** (-8)) * (np.linalg.det(w) ** (-1)) )
 
 def find_kahler_form(point):
@@ -33,8 +33,9 @@ def find_kahler_form(point):
 
 def jacobian(z):
     select = good_coord_mask(z)
-    partials = -(z[select] / elim_z_j(z)) ** 4
-    partial_i = np.where(z == z[find_max_dq_coord_index(z)])[0][0]
+    j = find_max_dq_coord_index(z)
+    partials = -(z[select] / z[j] ) ** 4
+    partial_i = find_max_dq_coord_index(z)
     diagonal_i = np.where(select)[0]
 
     jacobian = np.zeros((COORDINATES-2,COORDINATES), dtype=complex)
@@ -46,8 +47,6 @@ def jacobian(z):
 def fubini_study_kahler_form(point):
     return ((1 / np.pi) * (np.sum(np.abs(point) ** 2) ) ** (-2) 
         * ( (np.sum(np.abs(point) ** 2)) * np.eye(COORDINATES) - np.outer(np.conj(point), point) ))
-
-elim_z_j = lambda z : (-1) - np.sum(z[good_coord_mask(z)] ** 5)
 
 affine_coord = lambda p : np.isclose(p, np.complex(1, 0)) 
 
