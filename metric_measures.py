@@ -121,4 +121,4 @@ def vol_k_integrand(point_weight, g_pull_back):
 
 quintic_kahler_form_determinant = lambda g : np.linalg.det(g) #prefactors?
 
-omega_wedge_omega_conj = lambda point : 5 ** (-2) * np.abs(fq.elim_z_j(point)) ** (-8)
+omega_wedge_omega_conj = lambda point : 5 ** (-2) * np.abs( point[fq.find_max_dq_coord_index(point)] ) ** (-8)
