@@ -8,7 +8,7 @@ from scipy.special import comb
 import fermat_quintic 
 
 DONALDSON_MAX_ITERATIONS = 10
-PROCESSES = -2
+PROCESSES = -1
 
 def triu_exclude_diag(shape, value, dtype=int):
     n_k, _ = shape
@@ -25,7 +25,8 @@ def is_invertible(arr):
     return np.all(np.isclose(prod, np.eye(dim, dtype=np.complex), atol=1e-12))
 
 def initial_balanced_metric(n_k):
-    for _ in range(10):
+    #ensure initial metric is inverible and hermitian
+    for _ in range(10): 
         h_initial = triu_exclude_diag((n_k, n_k),  
             value=np.random.rand(1, 2).astype(float).view(np.complex128),
             dtype=complex)
@@ -49,12 +50,20 @@ def donaldson(k, max_iterations=10, generator=fermat_quintic.generate_quintic_po
         initial_balanced_metric(n_k))
 
 def t_operator(k, n_k, h_n, point_weights):
+    chunk_size = 100
+    point_weight_chunks = (np.array_split(point_weights, int(point_weights.shape[0] / chunk_size) )
+        if point_weights.shape[0] > chunk_size else [ point_weights ] )
+
     with Parallel(n_jobs=PROCESSES, prefer='processes') as parallel:
         t_acc = np.zeros((n_k, n_k), dtype=np.complex64)
-        res = parallel(delayed(t_operator_integrand) (k, h_n, point_weight) 
-            for point_weight in point_weights)
+        res = parallel(delayed(t_operator_integrand_acc) (k, h_n, point_weight_chunk) 
+            for point_weight_chunk in point_weight_chunks)
         t_acc += sum(res)
         return t_acc
+
+def t_operator_integrand_acc(k, h_n, point_weights):
+    return reduce(lambda acc, point_weight : acc + t_operator_integrand(k, h_n, point_weight), 
+        point_weights, np.zeros_like(h_n))
 
 def t_operator_integrand(k, h_n, point_weight):
     s_p = fermat_quintic.eval_sections(fermat_quintic.monomials(k), point_weight['point']) 
