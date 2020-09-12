@@ -17,15 +17,18 @@ def main(epochs=3, batch_size=32, sample_size=28, no_of_samples = 10000):
     features = convert_to_ndarray(fq.quintic_point_weights(no_of_samples))
     train_dataset = tf.data.Dataset.from_tensor_slices((features, features))
     train_dataset = train_dataset.shuffle(buffer_size=1024).batch(batch_size)
-    model = model_train(model, train_dataset, batch_size, sample_size, epochs)
+    model, loss = model_train(model, train_dataset, batch_size, sample_size, epochs)
 
-    model.save('%d_model_b%d_s%d_n%d.h5' % (int(time()), batch_size, sample_size, no_of_samples))
+    file_name = '%d_model_b%d_s%d_n%d.h5' % (int(time()), batch_size, sample_size, no_of_samples)
+    np.save(file_name, loss.numpy())
+    model.save(file_name)
 
 convert_to_ndarray = (lambda point_weights : 
     np.array(list(map(lambda pw : np.append(pw['point'].view(np.float32), pw['weight']), point_weights)), dtype=np.float32))
 
 def model_train(model, train_dataset, batch_size, sample_size=4, epochs=5):
     loss_func = sigma_loss(sample_size, batch_size)
+    loss_history = []
     for epoch in tf.range(1, epochs + 1):
         print("epoch %d/%d" % (epoch, epochs))
         for step, (x_batch_train, _) in enumerate(train_dataset): 
@@ -34,9 +37,8 @@ def model_train(model, train_dataset, batch_size, sample_size=4, epochs=5):
                 losses = loss_func(x_batch_train, logits)
             grads = tape.gradient(losses, model.trainable_weights)
             model.optimizer.apply_gradients(zip(grads, model.trainable_weights))
-            if step % 50 == 0: 
-                print('batch loss: %f, avg. loss: %f' % ( tf.reduce_sum(losses), tf.math.reduce_mean(losses)))
-    return model
+            loss_history.append(tf.reduce_sum(losses))
+    return model, tf.concat(loss_history, axis=0)
 
 def config_model():
     model = keras.Sequential()

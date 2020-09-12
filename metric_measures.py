@@ -5,37 +5,20 @@ import numdifftools as nd
 from joblib import Parallel, delayed
 from functools import * 
 
-metric_point_weight_dtype = np.dtype([
-    ('metric', np.complex64, (3, 3)), 
-    ('point_weight', fq.point_weight_dtype), 
-])
-
-def sigma_error(g_point_weights):
-    """ Calculates sigma error for a given set of 3-tuples containing point-weight pairs and corresponding local pull-back metric """
-    n_t = len(g_point_weights)
-    vol_cy = volume_cy(g_point_weights['point_weight'])
-    #dummy lambda necessary when calculating `g_pull_back` prior to calling `sigma_error`
-    vol_k = (1 / n_t) * np.sum([ vol_k_integrand(gpw['point_weight'], (lambda _ : gpw['metric'])) 
-        for gpw in g_point_weights ]) 
-    sigma_integrand = np.vectorize(lambda gpw : np.abs(1 - quintic_kahler_form_determinant(gpw['metric']) 
-            * vol_cy / (omega_wedge_omega_conj(gpw['point_weight']['point']) * vol_k ) ) * gpw['point_weight']['weight'], 
-            signature='()->()')
-    return (n_t * vol_cy) ** (-1) * sum(sigma_integrand(g_point_weights))
-
-def __sigma_error(g_pull_back, point_weights):
+def sigma_error(g_pull_back, point_weights):
     vol_cy = volume_cy(point_weights)
     vol_k = volume_k(point_weights, g_pull_back)
     n_t = len(point_weights)
 
     sigma_integrand = np.vectorize(lambda pw : np.abs(1 - quintic_kahler_form_determinant(g_pull_back(pw['point'])) 
-            * vol_cy / (omega_wedge_omega_conj(pw['point']) * vol_k )) * pw['weight'], 
+            * vol_cy / (omega_wedge_omega_conj(pw['point']) * vol_k ) ) * pw['weight'], 
                 signature='()->()')
     with Parallel(n_jobs=-1, prefer='processes') as parallel:
         sigma_acc_part = parallel(delayed(sigma_integrand) (point_weight) for point_weight in point_weights)
         return (n_t * vol_cy) ** (-1) * sum(sigma_acc_part)
 
 def sigma(k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
-    return __sigma_error(g_pull_back=lambda p : fq.pull_back(k, h_balanced, p), 
+    return sigma_error(g_pull_back=lambda p : fq.pull_back(k, h_balanced, p), 
         point_weights=generator(k, n_t))
 
 def global_ricci_scalar (k, n_t, h_balanced, generator=fq.generate_quintic_point_weights):
@@ -119,6 +102,6 @@ def vol_k_integrand(point_weight, g_pull_back):
     omega_squared = omega_wedge_omega_conj(point)
     return (omega3 / omega_squared) * weight
 
-quintic_kahler_form_determinant = lambda g : np.linalg.det(g) #prefactors?
+quintic_kahler_form_determinant = lambda g : np.real(np.linalg.det(g)) #prefactors?
 
 omega_wedge_omega_conj = lambda point : 5 ** (-2) * np.abs( point[fq.find_max_dq_coord_index(point)] ) ** (-8)

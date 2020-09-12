@@ -9,6 +9,7 @@ import fermat_quintic
 
 DONALDSON_MAX_ITERATIONS = 10
 PROCESSES = -1
+T_OPERATOR_CHUNK_SIZE = 100
 
 def triu_exclude_diag(shape, value, dtype=int):
     n_k, _ = shape
@@ -50,9 +51,8 @@ def donaldson(k, max_iterations=10, generator=fermat_quintic.generate_quintic_po
         initial_balanced_metric(n_k))
 
 def t_operator(k, n_k, h_n, point_weights):
-    chunk_size = 100
-    point_weight_chunks = (np.array_split(point_weights, int(point_weights.shape[0] / chunk_size) )
-        if point_weights.shape[0] > chunk_size else [ point_weights ] )
+    point_weight_chunks = (np.array_split(point_weights, int(point_weights.shape[0] / T_OPERATOR_CHUNK_SIZE) )
+        if point_weights.shape[0] > T_OPERATOR_CHUNK_SIZE else [ point_weights ] )
 
     with Parallel(n_jobs=PROCESSES, prefer='processes') as parallel:
         t_acc = np.zeros((n_k, n_k), dtype=np.complex64)
