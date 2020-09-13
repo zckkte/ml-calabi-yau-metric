@@ -17,7 +17,7 @@ def main(epochs=3, batch_size=32, sample_size=28, no_of_samples = 10000):
     features = convert_to_ndarray(fq.quintic_point_weights(no_of_samples))
     train_dataset = tf.data.Dataset.from_tensor_slices((features, features))
     train_dataset = train_dataset.shuffle(buffer_size=1024).batch(batch_size)
-    model, loss = model_train(model, train_dataset, batch_size, sample_size, epochs)
+    model, loss = model_train(model, train_dataset, batch_size, sample_size, epochs, loss_func=sigma_loss_alt)
 
     file_name = '%d_model_b%d_s%d_n%d.h5' % (int(time()), batch_size, sample_size, no_of_samples)
     np.save(file_name, loss.numpy())
@@ -26,8 +26,19 @@ def main(epochs=3, batch_size=32, sample_size=28, no_of_samples = 10000):
 convert_to_ndarray = (lambda point_weights : 
     np.array(list(map(lambda pw : np.append(pw['point'].view(np.float32), pw['weight']), point_weights)), dtype=np.float32))
 
-def model_train(model, train_dataset, batch_size, sample_size=4, epochs=5):
-    loss_func = sigma_loss(sample_size, batch_size)
+sigma_loss_alt = tf.function(lambda x_true, y_pred : 
+    tf_metric_measures.simple_sigma(concat_point_weight_det(x_true, y_pred)))
+
+def sigma_loss(sample_size, batch_size): 
+    sigma_error_vec = lambda pairs : tf.foldl (lambda sigma_acc, pair : sigma_acc 
+        + tf_metric_measures.sigma_error(pair), pairs, 0., parallel_iterations=batch_size)
+    sigma = lambda sample_pairs : tf.map_fn(sigma_error_vec, sample_pairs, dtype=tf.float32, 
+        parallel_iterations=sample_pairs.shape[0])
+
+    #HACK: abusing y_true argument for the purpose of providing x_true as input to loss function
+    return tf.function(lambda x_true, y_pred : sigma(sample_tuples(concat_point_weight_det(x_true, y_pred), sample_size)) )
+
+def model_train(model, train_dataset, batch_size, sample_size, epochs=5, loss_func=sigma_loss_alt):
     loss_history = []
     for epoch in tf.range(1, epochs + 1):
         print("epoch %d/%d" % (epoch, epochs))
@@ -58,15 +69,6 @@ def to_hermitian(x):
     low = tf.linalg.band_part(1j * t1, -1, 0)
     out = up + tf.transpose(up) - tf.linalg.band_part(t1, 0, 0)
     return out + low + tf.math.conj(tf.transpose(low))
-
-def sigma_loss(sample_size, batch_size): 
-    sigma_error_vec = lambda pairs : tf.foldl (lambda sigma_acc, pair : sigma_acc 
-        + tf_metric_measures.sigma_error(pair), pairs, 0., parallel_iterations=batch_size)
-    sigma = lambda sample_pairs : tf.map_fn(sigma_error_vec, sample_pairs, dtype=tf.float32, 
-        parallel_iterations=sample_pairs.shape[0])
-
-    #HACK: abusing y_true argument for the purpose of providing x_true as input to loss function
-    return tf.function(lambda x_true, y_pred : sigma(sample_tuples(concat_point_weight_det(x_true, y_pred), sample_size)) )
 
 def to_complex_point_weight(x_true):
     point_real = x_true[:, 0:COORDINATES * 2][:, ::2]
@@ -101,7 +103,7 @@ def parser_config():
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('-e', type=int, required=True, help='number of epochs')
     parser.add_argument('-b', type=int, required=True, help='batch size')
-    parser.add_argument('-s', type=int, required=True, help='loss sample size')
+    parser.add_argument('-s', type=int, required=False, help='loss sample size')
     parser.add_argument('-N', type=int, default=100000, help='number of sample points')
     return parser
 

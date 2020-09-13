@@ -3,6 +3,15 @@ import tensorflow as tf
 COORDINATES = 5
 PURELY_REAL = tf.cast(tf.complex(1.,0.), dtype=tf.complex64)
 
+def simple_sigma(g_point_weights):
+    n_t = g_point_weights.shape[0] 
+    weights = tf.math.real(g_point_weights[:, COORDINATES])
+    vol_cy = volume_cy(n_t, weights)
+    vol_k = volume_k(n_t, g_point_weights)
+    return tf.map_fn(lambda gpw : tf.abs(1 - __determinant(gpw) * vol_cy / (omega_wedge_omega_conj(__point(gpw)) * vol_k) ) * __weight(gpw),
+        g_point_weights, dtype=tf.float32,
+        parallel_iterations =g_point_weights.shape[0])
+
 def sigma_error(g_point_weights):
     """ tensorflow implementation of sigma error 
         g_point_weights = [ [...point, ...weight, ...determinant ], ...]
