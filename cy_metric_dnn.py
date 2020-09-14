@@ -103,7 +103,7 @@ def parser_config():
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('-e', type=int, required=True, help='number of epochs')
     parser.add_argument('-b', type=int, required=True, help='batch size')
-    parser.add_argument('-s', type=int, required=False, help='loss sample size')
+    parser.add_argument('-s', type=int, default=0, help='loss sample size')
     parser.add_argument('-N', type=int, default=100000, help='number of sample points')
     return parser
 
