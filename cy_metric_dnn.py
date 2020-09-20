@@ -20,8 +20,16 @@ def main(epochs=3, batch_size=32, sample_size=28, no_of_samples = 10000):
     model, loss = model_train(model, train_dataset, batch_size, sample_size, epochs, loss_func=sigma_loss_alt)
 
     file_name = '%d_model_b%d_s%d_n%d.h5' % (int(time()), batch_size, sample_size, no_of_samples)
+    test = convert_to_ndarray(fq.quintic_point_weights(int(0.3 * no_of_samples)))
+    print('sigma-measure (train): %f' % eval_model_sigma(model, features).numpy())
+    print('sigma-measure (test): %f' % eval_model_sigma(model, test).numpy())
+
     np.save(file_name, loss.numpy())
     model.save(file_name)
+
+def eval_model_sigma(model, point_weights):
+    gs = model.predict(point_weights)
+    return tf_metric_measures.sigma_error(concat_point_weight_det(point_weights, gs))
 
 convert_to_ndarray = (lambda point_weights : 
     np.array(list(map(lambda pw : np.append(pw['point'].view(np.float32), pw['weight']), point_weights)), dtype=np.float32))
