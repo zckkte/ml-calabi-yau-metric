@@ -14,18 +14,24 @@ def main(epochs=3, batch_size=32, sample_size=28, no_of_samples = 10000):
     model = config_model()
     model.compile(optimizer = keras.optimizers.Adagrad(learning_rate=LEARNING_RATE), metrics=['accuracy'])
 
+    train_dataset = feature_dataset(no_of_samples, batch_size)
+    val_dataset = feature_dataset(no_of_samples, batch_size)
+
+    model, loss, val_loss = model_train(model, train_dataset, val_dataset, batch_size, 
+        sample_size, epochs, loss_func=sigma_loss_alt)
+
+    file_name_suffix = '%d_b%d_s%d_n%d.h5' % (int(time()), batch_size, sample_size, no_of_samples)
+    test_samples = convert_to_ndarray(fq.quintic_point_weights(int(0.3 * no_of_samples)))
+    print('sigma-measure (test): %f' % eval_model_sigma(model, test_samples).numpy())
+
+    np.save('loss_' + file_name_suffix , loss.numpy())
+    np.save('val_loss_' + file_name_suffix, val_loss.numpy())
+    model.save('model_' + file_name_suffix)
+
+def feature_dataset(no_of_samples, batch_size):
     features = convert_to_ndarray(fq.quintic_point_weights(no_of_samples))
-    train_dataset = tf.data.Dataset.from_tensor_slices((features, features))
-    train_dataset = train_dataset.shuffle(buffer_size=1024).batch(batch_size)
-    model, loss = model_train(model, train_dataset, batch_size, sample_size, epochs, loss_func=sigma_loss_alt)
-
-    file_name = '%d_model_b%d_s%d_n%d.h5' % (int(time()), batch_size, sample_size, no_of_samples)
-    test = convert_to_ndarray(fq.quintic_point_weights(int(0.3 * no_of_samples)))
-    print('sigma-measure (train): %f' % eval_model_sigma(model, features).numpy())
-    print('sigma-measure (test): %f' % eval_model_sigma(model, test).numpy())
-
-    np.save(file_name, loss.numpy())
-    model.save(file_name)
+    return (tf.data.Dataset.from_tensor_slices((features, features))
+        .shuffle(buffer_size=1024).batch(batch_size))
 
 def eval_model_sigma(model, point_weights):
     gs = model.predict(point_weights)
@@ -46,8 +52,9 @@ def sigma_loss(sample_size, batch_size):
     #HACK: abusing y_true argument for the purpose of providing x_true as input to loss function
     return tf.function(lambda x_true, y_pred : sigma(sample_tuples(concat_point_weight_det(x_true, y_pred), sample_size)) )
 
-def model_train(model, train_dataset, batch_size, sample_size, epochs=5, loss_func=sigma_loss_alt):
+def model_train(model, train_dataset,validation_dataset, batch_size, sample_size, epochs=5, loss_func=sigma_loss_alt):
     loss_history = []
+    val_loss_history = []
     for epoch in tf.range(1, epochs + 1):
         print("epoch %d/%d" % (epoch, epochs))
         for step, (x_batch_train, _) in enumerate(train_dataset): 
@@ -57,7 +64,12 @@ def model_train(model, train_dataset, batch_size, sample_size, epochs=5, loss_fu
             grads = tape.gradient(losses, model.trainable_weights)
             model.optimizer.apply_gradients(zip(grads, model.trainable_weights))
             loss_history.append(tf.reduce_sum(losses))
-    return model, tf.concat(loss_history, axis=0)
+
+        for x_batch_val, _ in validation_dataset:
+            val_logits = model(x_batch_val, training=False)
+            val_losses = loss_func(x_batch_train, val_logits)
+            val_loss_history.append(tf.reduce_sum(val_losses))
+    return model, tf.concat(loss_history, axis=0), tf.concat(val_loss_history, axis=0)
 
 def config_model():
     model = keras.Sequential()
